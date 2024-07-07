@@ -1,0 +1,139 @@
+import torch
+import torch.nn as nn
+from diffusers import StableDiffusionPipeline
+import torch.nn.functional as F
+
+
+class EpipolarWarpOperator(nn.Module):
+    def __init__(self):
+        super().__init__()
+        # 실제 구현에서는 더 복잡한 로직이 필요할 수 있습니다
+        self.warp_conv = nn.Conv2d(320, 320, kernel_size=3, padding=1)
+
+    def forward(self, features, source_pose, target_pose):
+        # 여기서는 간단한 구현을 보여줍니다. 실제로는 epipolar geometry를 사용해야 합니다
+        pose_diff = target_pose - source_pose
+        warped_features = self.warp_conv(features + pose_diff.view(-1, 7, 1, 1))
+        return warped_features
+
+
+class Aggregator(nn.Module):
+    def __init__(self, channels):
+        super().__init__()
+        self.attention = nn.MultiheadAttention(channels, 8)
+        self.norm = nn.LayerNorm(channels)
+
+    def forward(self, features_list):
+        # 특징들을 (seq_len, batch, channels) 형태로 변환
+        features = torch.stack(features_list, dim=0)
+        aggregated, _ = self.attention(features, features, features)
+        return self.norm(features + aggregated).mean(dim=0)
+
+
+class GeometricControlNet(nn.Module):
+    def __init__(self, sd_model, num_control_channels=7, num_views=3):
+        super().__init__()
+        self.sd_model = sd_model
+        self.unet = sd_model.unet
+        self.num_views = num_views
+
+        # Freeze the base model parameters
+        for param in self.sd_model.parameters():
+            param.requires_grad = False
+
+        # Create control net layers (채널 수 조정 필요)
+        self.control_layers = nn.ModuleList(
+            [self._make_control_block(num_control_channels, 320)]
+            + [self._make_control_block(320, 320) for _ in range(11)]
+        )
+
+        # Zero convolutions
+        self.zero_convs = nn.ModuleList([self._make_zero_conv(320) for _ in range(13)])
+
+        # Epipolar Warp Operator
+        self.epipolar_warp = EpipolarWarpOperator()
+
+        # Aggregator
+        self.aggregator = Aggregator(320)
+
+    def add_noise(self, x, t):
+        noise = torch.randn_like(x)
+        return x * (self.noise_schedule[t] ** 0.5) + noise * (
+            (1 - self.noise_schedule[t]) ** 0.5
+        )
+
+    def extract_features(self, x, timestep, text_embeds):
+        # Stable Diffusion의 UNet을 사용하여 특징 추출
+        down_block_res_samples, mid_block_res_sample = self.unet.down_blocks(
+            x, timestep, encoder_hidden_states=text_embeds
+        )
+        return down_block_res_samples
+
+    def _make_control_block(self, in_channels, out_channels):
+        return nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
+            nn.SiLU(),
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+            nn.SiLU(),
+        )
+
+    def _make_zero_conv(self, channels):
+        return nn.Conv2d(channels, channels, kernel_size=1, padding=0)
+
+    def forward(self, x, timestep, camera_poses, prompt=None):
+        batch_size, _, height, width = x.shape
+        # 텍스트 임베딩 생성 (프롬프트가 없는 경우 처리)
+        if prompt is None:
+            text_embeds = self.sd_model.encode_text([""] * batch_size)
+        else:
+            text_embeds = self.sd_model.encode_text(prompt)
+
+        # 특징 추출
+        extracted_features = self.extract_features(x, timestep, text_embeds)
+
+        control_outputs = []
+        for view_idx in range(self.num_views):
+            camera_pose = (
+                camera_poses[:, view_idx]
+                .view(batch_size, -1, 1, 1)
+                .repeat(1, 1, height, width)
+            )
+            view_control_outputs = []
+            for control_layer, feature in zip(self.control_layers, extracted_features):
+                camera_pose = control_layer(torch.cat([camera_pose, feature], dim=1))
+                view_control_outputs.append(camera_pose)
+            control_outputs.append(view_control_outputs)
+
+        # Epipolar warping and aggregation (이전과 동일)
+        aggregated_controls = []
+        for level in range(len(control_outputs[0])):
+            warped_features = []
+            for view_idx in range(self.num_views):
+                source_pose = camera_poses[:, view_idx]
+                for target_idx in range(self.num_views):
+                    if target_idx != view_idx:
+                        target_pose = camera_poses[:, target_idx]
+                        warped = self.epipolar_warp(
+                            control_outputs[view_idx][level], source_pose, target_pose
+                        )
+                        warped_features.append(warped)
+            aggregated = self.aggregator(warped_features)
+            aggregated_controls.append(aggregated)
+
+        # 최종 출력 생성
+        final_output = torch.cat(aggregated_controls, dim=1)
+        return self.unet.conv_norm_out(final_output)
+
+
+# Example usage
+if __name__ == "__main__":
+    sd_model = StableDiffusionPipeline.from_pretrained(
+        "stabilityai/stable-diffusion-2-1-base"
+    )
+    model = GeometricControlNet(sd_model, num_views=3)
+    x = torch.randn(1, 4, 64, 64)
+    timestep = torch.tensor([500])
+    camera_poses = torch.randn(1, 3, 7)  # (batch, num_views, 7)
+    prompt = ["A photo of a cat"]
+    output = model(x, timestep, camera_poses, prompt)
+    print(f"Output shape: {output.shape}")

@@ -48,10 +48,12 @@ class GeometricControlNet(nn.Module):
         num_control_channels=7,
         num_views=3,
         aggregation_method="attention",
+        warp_last_n_stages=2,
     ):
         super().__init__()
         self.unet = unet
         self.num_views = num_views
+        self.warp_last_n_stages = warp_last_n_stages
 
         # Freeze the base model parameters
         for param in self.unet.parameters():
@@ -116,20 +118,30 @@ class GeometricControlNet(nn.Module):
                 view_control_outputs.append(camera_pose)
             control_outputs.append(view_control_outputs)
 
-        # Epipolar warping and aggregation (이전과 동일)
+        # Epipolar warping and aggregation (마지막 두 단계에만 적용)
+        num_stages = len(control_outputs[0])
         aggregated_controls = []
         for level in range(len(control_outputs[0])):
-            warped_features = []
-            for view_idx in range(self.num_views):
-                source_pose = camera_poses[:, view_idx]
-                for target_idx in range(self.num_views):
-                    if target_idx != view_idx:
-                        target_pose = camera_poses[:, target_idx]
-                        warped = self.epipolar_warp(
-                            control_outputs[view_idx][level], source_pose, target_pose
-                        )
-                        warped_features.append(warped)
-            aggregated = self.aggregator(warped_features)
+            if (
+                level >= num_stages - self.warp_last_n_stages
+            ):  # 마지막 두 단계에만 warping 적용
+                warped_features = []
+                for view_idx in range(self.num_views):
+                    source_pose = camera_poses[:, view_idx]
+                    for target_idx in range(self.num_views):
+                        if target_idx != view_idx:
+                            target_pose = camera_poses[:, target_idx]
+                            warped = self.epipolar_warp(
+                                control_outputs[view_idx][level],
+                                source_pose,
+                                target_pose,
+                            )
+                            warped_features.append(warped)
+                aggregated = self.aggregator(warped_features)
+            else:
+                # 이전 단계는 warping 없이 직접 사용
+                aggregated = sum(co[level] for co in control_outputs) / self.num_views
+
             aggregated_controls.append(aggregated)
 
         # 최종 출력 생성

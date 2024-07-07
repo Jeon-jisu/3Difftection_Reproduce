@@ -22,6 +22,7 @@ def train_geometric_controlnet(config):
         unet,
         num_views=config["model"]["num_views"],
         aggregation_method=config["model"]["aggregation_method"],
+        warp_last_n_stages=2,
     )
     model.to(device)
 
@@ -48,11 +49,8 @@ def train_geometric_controlnet(config):
             ).long()
             noisy_images = noise_scheduler.add_noise(clean_images, noise, timesteps)
 
-            # Empty text input
-            empty_text = [""] * clean_images.shape[0]
-
             # Forward pass
-            noise_pred = model(noisy_images, timesteps, camera_poses, empty_text)
+            noise_pred = model(noisy_images, timesteps, camera_poses)
 
             # Compute loss
             loss = F.mse_loss(noise_pred, noise)

@@ -5,6 +5,7 @@ model:
   base_channels: 32
   channel_multiplier: 2
   condition_image_key: "depth_map"
+  aggregation_method: 'attention'
 
 
 training:
@@ -36,5 +37,5 @@ device: 'cuda'
 num_workers: 4
 seed: 42
 
-pretrained_model_path: "stabilityai/stable-diffusion-2-1-base"
+stable_diffusion_path: "stabilityai/stable-diffusion-2-1-base"
 save_path: "checkpoints/geometric_controlnet.pth"

@@ -2,6 +2,7 @@ import torch
 from models.geometric_controlnet import GeometricControlNet
 from utils.data_loader import Omni3DDataset
 from diffusers import DDPMScheduler, UNet2DConditionModel
+import torch.nn.functional as F
 
 
 def train_geometric_controlnet(config):
@@ -9,23 +10,29 @@ def train_geometric_controlnet(config):
 
     # Load datasets
     train_dataset = Omni3DDataset(
-        config["data_dir"], "ARKitScenes", "train", resolution=256
+        config["data"]["data_dir"], "ARKitScenes", "train", resolution=256
     )
     train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=config["batch_size"], shuffle=True
+        train_dataset, batch_size=config["training"]["batch_size"], shuffle=True
     )
 
     # Initialize models
-    unet = UNet2DConditionModel.from_pretrained(config["pretrained_model_path"])
-    model = GeometricControlNet(unet)
+    unet = UNet2DConditionModel.from_pretrained(config["stable_diffusion_path"])
+    model = GeometricControlNet(
+        unet,
+        num_views=config["model"]["num_views"],
+        aggregation_method=config["model"]["aggregation_method"],
+    )
     model.to(device)
 
     # Initialize optimizer and scheduler
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config["learning_rate"])
+    optimizer = torch.optim.AdamW(
+        model.parameters(), lr=config["training"]["learning_rate"]
+    )
     noise_scheduler = DDPMScheduler(num_train_timesteps=1000)
 
     # Training loop
-    for epoch in range(config["num_epochs"]):
+    for epoch in range(config["training"]["num_epochs"]):
         for batch in train_loader:
             # Prepare input
             clean_images = batch["image"].to(device)
@@ -55,7 +62,9 @@ def train_geometric_controlnet(config):
             loss.backward()
             optimizer.step()
 
-        print(f"Epoch {epoch+1}/{config['num_epochs']}, Loss: {loss.item()}")
+        print(
+            f"Epoch {epoch+1}/{config['training']['num_epochs']}, Loss: {loss.item()}"
+        )
 
     # Save the model
     torch.save(model.state_dict(), config["save_path"])

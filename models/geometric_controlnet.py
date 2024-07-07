@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from diffusers import StableDiffusionPipeline
+from diffusers import UNet2DConditionModel
 import torch.nn.functional as F
 
 
@@ -18,27 +18,43 @@ class EpipolarWarpOperator(nn.Module):
 
 
 class Aggregator(nn.Module):
-    def __init__(self, channels):
+    def __init__(self, channels, method="attention"):
         super().__init__()
-        self.attention = nn.MultiheadAttention(channels, 8)
-        self.norm = nn.LayerNorm(channels)
+        self.method = method
+        if method == "attention":
+            self.attention = nn.MultiheadAttention(channels, 8)
+            self.norm = nn.LayerNorm(channels)
+        elif method not in ["mean", "max"]:
+            raise ValueError(
+                "Unsupported aggregation method. Choose 'attention', 'mean', or 'max'."
+            )
 
     def forward(self, features_list):
-        # 특징들을 (seq_len, batch, channels) 형태로 변환
-        features = torch.stack(features_list, dim=0)
-        aggregated, _ = self.attention(features, features, features)
-        return self.norm(features + aggregated).mean(dim=0)
+        if self.method == "attention":
+            # 특징들을 (seq_len, batch, channels) 형태로 변환
+            features = torch.stack(features_list, dim=0)
+            aggregated, _ = self.attention(features, features, features)
+            return self.norm(features + aggregated).mean(dim=0)
+        elif self.method == "mean":
+            return torch.stack(features_list).mean(dim=0)
+        elif self.method == "max":
+            return torch.stack(features_list).max(dim=0)[0]
 
 
 class GeometricControlNet(nn.Module):
-    def __init__(self, sd_model, num_control_channels=7, num_views=3):
+    def __init__(
+        self,
+        unet,
+        num_control_channels=7,
+        num_views=3,
+        aggregation_method="attention",
+    ):
         super().__init__()
-        self.sd_model = sd_model
-        self.unet = sd_model.unet
+        self.unet = unet
         self.num_views = num_views
 
         # Freeze the base model parameters
-        for param in self.sd_model.parameters():
+        for param in self.unet.parameters():
             param.requires_grad = False
 
         # Create control net layers (채널 수 조정 필요)
@@ -54,7 +70,7 @@ class GeometricControlNet(nn.Module):
         self.epipolar_warp = EpipolarWarpOperator()
 
         # Aggregator
-        self.aggregator = Aggregator(320)
+        self.aggregator = Aggregator(320, method=aggregation_method)
 
     def add_noise(self, x, t):
         noise = torch.randn_like(x)
@@ -80,16 +96,12 @@ class GeometricControlNet(nn.Module):
     def _make_zero_conv(self, channels):
         return nn.Conv2d(channels, channels, kernel_size=1, padding=0)
 
-    def forward(self, x, timestep, camera_poses, prompt=None):
+    def forward(self, x, timestep, camera_poses, encoder_hidden_states=None):
         batch_size, _, height, width = x.shape
-        # 텍스트 임베딩 생성 (프롬프트가 없는 경우 처리)
-        if prompt is None:
-            text_embeds = self.sd_model.encode_text([""] * batch_size)
-        else:
-            text_embeds = self.sd_model.encode_text(prompt)
-
+        if encoder_hidden_states is None:
+            encoder_hidden_states = torch.zeros(batch_size, 77, 768, device=x.device)
         # 특징 추출
-        extracted_features = self.extract_features(x, timestep, text_embeds)
+        extracted_features = self.extract_features(x, timestep, encoder_hidden_states)
 
         control_outputs = []
         for view_idx in range(self.num_views):
@@ -127,13 +139,12 @@ class GeometricControlNet(nn.Module):
 
 # Example usage
 if __name__ == "__main__":
-    sd_model = StableDiffusionPipeline.from_pretrained(
-        "stabilityai/stable-diffusion-2-1-base"
+    unet = UNet2DConditionModel.from_pretrained(
+        "stabilityai/stable-diffusion-2-1-base", subfolder="unet"
     )
-    model = GeometricControlNet(sd_model, num_views=3)
+    model = GeometricControlNet(unet, num_views=3, aggregation_method="mean")
     x = torch.randn(1, 4, 64, 64)
     timestep = torch.tensor([500])
     camera_poses = torch.randn(1, 3, 7)  # (batch, num_views, 7)
-    prompt = ["A photo of a cat"]
-    output = model(x, timestep, camera_poses, prompt)
+    output = model(x, timestep, camera_poses)
     print(f"Output shape: {output.shape}")

@@ -1,6 +1,11 @@
 import torch
 import torch.nn as nn
-from diffusers import UNet2DConditionModel
+from diffusers import (
+    UNet2DConditionModel,
+    CrossAttnDownBlock2D,
+    DownBlock2D,
+    AttnDownBlock2D,
+)
 import torch.nn.functional as F
 
 
@@ -149,11 +154,6 @@ class GeometricControlNet(nn.Module):
         num_views=3,
         aggregation_method="attention",
         warp_last_n_stages=2,
-        input_channels=3,
-        output_channels=64,
-        num_blocks=5,
-        base_channels=32,
-        channel_multiplier=2,
     ):
         super().__init__()
         self.unet = unet
@@ -164,45 +164,62 @@ class GeometricControlNet(nn.Module):
         for param in self.unet.parameters():
             param.requires_grad = False
 
-        # Create control net layers
-        self.control_layers = nn.ModuleList(
-            [
-                self._make_control_block(
-                    num_control_channels + input_channels, base_channels
-                )
-            ]
-            + [
-                self._make_control_block(
-                    base_channels * (channel_multiplier**i),
-                    base_channels * (channel_multiplier ** (i + 1)),
-                )
-                for i in range(num_blocks - 1)
-            ]
-        )
+        # Copy parameters from UNet to ControlNet
+        self.control_layers = nn.ModuleList()
+        for i, down_block in enumerate(self.unet.down_blocks):
+            if isinstance(down_block, CrossAttnDownBlock2D):
+                control_block = nn.ModuleList()
+                for resnet in down_block.resnets:
+                    cb = self._make_control_block(
+                        resnet.conv1.in_channels, resnet.conv1.out_channels
+                    )
+                    cb[0].load_state_dict(resnet.conv1.state_dict())
+                    cb[2].load_state_dict(resnet.conv2.state_dict())
+                    control_block.append(cb)
+                self.control_layers.append(control_block)
+            elif isinstance(down_block, DownBlock2D):
+                control_block = nn.ModuleList()
+                for resnet in down_block.resnets:
+                    cb = self._make_control_block(
+                        resnet.conv1.in_channels, resnet.conv1.out_channels
+                    )
+                    cb[0].load_state_dict(resnet.conv1.state_dict())
+                    cb[2].load_state_dict(resnet.conv2.state_dict())
+                    control_block.append(cb)
+                self.control_layers.append(control_block)
+            elif isinstance(down_block, AttnDownBlock2D):
+                control_block = nn.ModuleList()
+                for resnet in down_block.resnets:
+                    cb = self._make_control_block(
+                        resnet.conv1.in_channels, resnet.conv1.out_channels
+                    )
+                    cb[0].load_state_dict(resnet.conv1.state_dict())
+                    cb[2].load_state_dict(resnet.conv2.state_dict())
+                    control_block.append(cb)
+                self.control_layers.append(control_block)
+            else:
+                raise ValueError(f"Unexpected down_block type: {type(down_block)}")
 
-        # Zero convolutions
-        self.zero_convs_in = nn.ModuleList(
-            [
-                self._make_zero_conv(base_channels * (channel_multiplier**i))
-                for i in range(num_blocks)
-            ]
-        )
-        self.zero_convs_out = nn.ModuleList(
-            [
-                self._make_zero_conv(base_channels * (channel_multiplier**i))
-                for i in range(num_blocks)
-            ]
-        )
+        # Adjust zero convolutions to match the structure of control layers
+        self.zero_convs_in = nn.ModuleList()
+        self.zero_convs_out = nn.ModuleList()
+        for control_block in self.control_layers:
+            zero_convs_in_block = nn.ModuleList()
+            zero_convs_out_block = nn.ModuleList()
+            for cb in control_block:
+                zero_convs_in_block.append(self._make_zero_conv(cb[0].in_channels))
+                zero_convs_out_block.append(self._make_zero_conv(cb[-1].out_channels))
+            self.zero_convs_in.append(zero_convs_in_block)
+            self.zero_convs_out.append(zero_convs_out_block)
 
-        # Epipolar Warp Operator
-        self.epipolar_warp = EpipolarWarpOperator(
-            base_channels * (channel_multiplier ** (num_blocks - 1))
-        )
+        # Adjust Epipolar Warp Operator
+        last_control_block = self.control_layers[-1]
+        last_cb = last_control_block[-1]
+        self.epipolar_warp = EpipolarWarpOperator(last_cb[-1].out_channels)
 
-        # Aggregator
+        # Adjust Aggregator
         self.aggregator = Aggregator(
-            base_channels * (channel_multiplier ** (num_blocks - 1)),
-            method=aggregation_method,
+            last_cb[-1].out_channels, method=aggregation_method
         )
 
     def add_noise(self, x, t):

@@ -5,10 +5,10 @@ import torch.nn.functional as F
 
 
 class EpipolarWarpOperator(nn.Module):
-    def __init__(self):
+    def __init__(self, channels):
         super().__init__()
         # 실제 구현에서는 더 복잡한 로직이 필요할 수 있습니다
-        self.warp_conv = nn.Conv2d(320, 320, kernel_size=3, padding=1)
+        self.warp_conv = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
 
     def forward(self, features, source_pose, target_pose):
         # 여기서는 간단한 구현을 보여줍니다. 실제로는 epipolar geometry를 사용해야 합니다
@@ -59,17 +59,22 @@ class GeometricControlNet(nn.Module):
         for param in self.unet.parameters():
             param.requires_grad = False
 
-        # Create control net layers (채널 수 조정 필요)
+        # Create control net layers
         self.control_layers = nn.ModuleList(
-            [self._make_control_block(num_control_channels, 320)]
+            [self._make_control_block(num_control_channels + 4, 320)]  # 4 for RGBD
             + [self._make_control_block(320, 320) for _ in range(11)]
         )
 
         # Zero convolutions
-        self.zero_convs = nn.ModuleList([self._make_zero_conv(320) for _ in range(13)])
+        self.zero_convs_in = nn.ModuleList(
+            [self._make_zero_conv(320) for _ in range(12)]
+        )
+        self.zero_convs_out = nn.ModuleList(
+            [self._make_zero_conv(320) for _ in range(12)]
+        )
 
         # Epipolar Warp Operator
-        self.epipolar_warp = EpipolarWarpOperator()
+        self.epipolar_warp = EpipolarWarpOperator(320)
 
         # Aggregator
         self.aggregator = Aggregator(320, method=aggregation_method)
@@ -98,12 +103,23 @@ class GeometricControlNet(nn.Module):
     def _make_zero_conv(self, channels):
         return nn.Conv2d(channels, channels, kernel_size=1, padding=0)
 
-    def forward(self, x, timestep, camera_poses, encoder_hidden_states=None):
-        batch_size, _, height, width = x.shape
+    def forward(
+        self,
+        condition_view,
+        target_view,
+        timestep,
+        camera_poses,
+        encoder_hidden_states=None,
+    ):
+        batch_size, _, height, width = target_view.shape
         if encoder_hidden_states is None:
             encoder_hidden_states = torch.zeros(batch_size, 77, 768, device=x.device)
-        # 특징 추출
-        extracted_features = self.extract_features(x, timestep, encoder_hidden_states)
+
+        # Extract features from target view using frozen SD encoder
+        with torch.no_grad():
+            target_features = self.unet.down_blocks(
+                target_view, timestep, encoder_hidden_states=encoder_hidden_states
+            )
 
         control_outputs = []
         for view_idx in range(self.num_views):
@@ -112,10 +128,23 @@ class GeometricControlNet(nn.Module):
                 .view(batch_size, -1, 1, 1)
                 .repeat(1, 1, height, width)
             )
+            x = torch.cat([condition_view[:, view_idx], camera_pose], dim=1)
             view_control_outputs = []
-            for control_layer, feature in zip(self.control_layers, extracted_features):
-                camera_pose = control_layer(torch.cat([camera_pose, feature], dim=1))
-                view_control_outputs.append(camera_pose)
+            for i, (control_layer, zero_conv_in, zero_conv_out) in enumerate(
+                zip(self.control_layers, self.zero_convs_in, self.zero_convs_out)
+            ):
+                x = zero_conv_in(x)
+                x = control_layer(x)
+                if (
+                    i >= num_stages - self.warp_last_n_stages
+                ):  # 마지막 self.warp_last_n_stages 개수의 단계에서만 warping 적용
+                    x = self.epipolar_warp(
+                        x,
+                        camera_poses[:, view_idx],
+                        camera_poses[:, (view_idx + 1) % self.num_views],
+                    )
+                x = zero_conv_out(x)
+                view_control_outputs.append(x)
             control_outputs.append(view_control_outputs)
 
         # Epipolar warping and aggregation (마지막 두 단계에만 적용)
@@ -124,7 +153,7 @@ class GeometricControlNet(nn.Module):
         for level in range(len(control_outputs[0])):
             if (
                 level >= num_stages - self.warp_last_n_stages
-            ):  # 마지막 두 단계에만 warping 적용
+            ):  # 마지막 두 단계에만 Epipolar warping 적용
                 warped_features = []
                 for view_idx in range(self.num_views):
                     source_pose = camera_poses[:, view_idx]
@@ -144,9 +173,22 @@ class GeometricControlNet(nn.Module):
 
             aggregated_controls.append(aggregated)
 
+        # Combined Features는 aggregated_control과 target_features를 결합한 것
+
+        combined_features = []
+        for control, target in zip(aggregated_controls, target_features):
+            combined_features.append(control + target)
+
+        # 이렇게 결합된 특징들을 UNet의 업샘플링 경로(up_blocks)를 통과시키는 과정. 이 과정을 통해 점진적으로 해상도가 증가하며, 최종적으로 원본 입력 크기의 특징맵이 생성
+
+        hidden_states = combined_features[-1]  # 가장 낮은 해상도의 특징맵으로 초기화
+
+        # 각 up_block은 현재의 hidden_states와 combined_features에서 pop()한 skip connection을 입력으로 받아 처리
+        for up_block in self.unet.up_blocks:
+            hidden_states = up_block(hidden_states, combined_features.pop())
+
         # 최종 출력 생성
-        final_output = torch.cat(aggregated_controls, dim=1)
-        return self.unet.conv_norm_out(final_output)
+        return self.unet.conv_norm_out(hidden_states)
 
 
 # Example usage

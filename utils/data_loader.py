@@ -52,3 +52,23 @@ class Omni3DDataset(Dataset):
             "boxes_3d": boxes_3d,
             "camera_pose": camera_pose,
         }
+
+    def load_camera_params(traj_file_path, pincam_file_path):
+        # Load extrinsic parameters
+        extrinsic_params = []
+        with open(traj_file_path, "r") as f:
+            for line in f:
+                values = line.strip().split()
+                # timestamp는 제외하고 rotation과 translation만 사용
+                extrinsic = [float(v) for v in values[1:]]
+                extrinsic_params.append(extrinsic)
+
+        # Load intrinsic parameters
+        with open(pincam_file_path, "r") as f:
+            line = f.readline().strip().split()
+            intrinsic = [float(v) for v in line[2:]]  # width, height 제외
+
+        # Combine extrinsic and intrinsic parameters
+        combined_params = [extrinsic + intrinsic for extrinsic in extrinsic_params]
+
+        return torch.tensor(combined_params)

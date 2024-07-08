@@ -7,14 +7,114 @@ import torch.nn.functional as F
 class EpipolarWarpOperator(nn.Module):
     def __init__(self, channels):
         super().__init__()
-        # 실제 구현에서는 더 복잡한 로직이 필요할 수 있습니다
-        self.warp_conv = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        self.channels = channels
+        self.conv = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
 
-    def forward(self, features, source_pose, target_pose):
-        # 여기서는 간단한 구현을 보여줍니다. 실제로는 epipolar geometry를 사용해야 합니다
-        pose_diff = target_pose - source_pose
-        warped_features = self.warp_conv(features + pose_diff.view(-1, 7, 1, 1))
+    def axis_angle_to_rotation_matrix(self, axis_angle):
+        theta = torch.norm(axis_angle, dim=-1, keepdim=True)
+        axis = axis_angle / (theta + 1e-8)
+        cos_theta = torch.cos(theta)
+        sin_theta = torch.sin(theta)
+        return (
+            cos_theta * torch.eye(3, device=axis_angle.device).unsqueeze(0)
+            + (1 - cos_theta) * axis.unsqueeze(-1) * axis.unsqueeze(-2)
+            + sin_theta
+            * torch.cross(
+                torch.eye(3, device=axis_angle.device).unsqueeze(0),
+                axis.unsqueeze(-1),
+                dim=-1,
+            )
+        )
+
+    def compute_fundamental_matrix(
+        self, source_pose, target_pose, source_intrinsics, target_intrinsics
+    ):
+        # Convert axis-angle to rotation matrix
+        R1 = self.axis_angle_to_rotation_matrix(source_pose[:, :3])
+        R2 = self.axis_angle_to_rotation_matrix(target_pose[:, :3])
+        t1, t2 = source_pose[:, 3:], target_pose[:, 3:]
+
+        # Compute relative rotation and translation
+        R = torch.matmul(R2, R1.transpose(1, 2))
+        t = t2 - torch.matmul(R, t1.unsqueeze(-1)).squeeze(-1)
+
+        # Compute essential matrix
+        t_cross = torch.zeros_like(R)
+        t_cross[:, 0, 1], t_cross[:, 0, 2] = -t[:, 2], t[:, 1]
+        t_cross[:, 1, 0], t_cross[:, 1, 2] = t[:, 2], -t[:, 0]
+        t_cross[:, 2, 0], t_cross[:, 2, 1] = -t[:, 1], t[:, 0]
+        E = torch.matmul(t_cross, R)
+
+        # Compute fundamental matrix
+        F = torch.matmul(
+            torch.matmul(torch.inverse(target_intrinsics).transpose(1, 2), E),
+            torch.inverse(source_intrinsics),
+        )
+        return F
+
+    def compute_epipolar_lines(self, points, F):
+        # Compute epipolar lines for given points
+        homogeneous_points = torch.cat([points, torch.ones_like(points[:, :1])], dim=1)
+        epipolar_lines = torch.matmul(F, homogeneous_points.transpose(1, 2)).transpose(
+            1, 2
+        )
+        return epipolar_lines
+
+    def warp_features(
+        self, features, source_pose, target_pose, source_intrinsics, target_intrinsics
+    ):
+        b, c, h, w = features.shape
+
+        # Compute fundamental matrix
+        F = self.compute_fundamental_matrix(
+            source_pose, target_pose, source_intrinsics, target_intrinsics
+        )
+
+        # Create grid of pixel coordinates
+        y, x = torch.meshgrid(
+            torch.arange(h, device=features.device),
+            torch.arange(w, device=features.device),
+        )
+        points = torch.stack([x.flatten(), y.flatten()], dim=1).float()
+        points = points.unsqueeze(0).repeat(b, 1, 1)
+
+        # Compute epipolar lines
+        epipolar_lines = self.compute_epipolar_lines(points, F)
+
+        # Compute closest points on epipolar lines
+        a, b, c = (
+            epipolar_lines[:, :, 0],
+            epipolar_lines[:, :, 1],
+            epipolar_lines[:, :, 2],
+        )
+        x = -(a * c) / (a**2 + b**2 + 1e-8)
+        y = -(b * c) / (a**2 + b**2 + 1e-8)
+
+        # Create sampling grid
+        grid_x = (2.0 * x / (w - 1)) - 1.0
+        grid_y = (2.0 * y / (h - 1)) - 1.0
+        grid = torch.stack([grid_x, grid_y], dim=-1).view(b, h, w, 2)
+
+        # Sample features using grid
+        warped_features = F.grid_sample(
+            features, grid, mode="bilinear", padding_mode="zeros", align_corners=True
+        )
+
         return warped_features
+
+    def forward(
+        self,
+        features,
+        source_pose,
+        target_pose,
+        source_intrinsics,
+        target_intrinsics,
+    ):
+        warped_features = self.warp_features(
+            features, source_pose, target_pose, source_intrinsics, target_intrinsics
+        )
+        refined_features = self.conv(warped_features)
+        return refined_features
 
 
 class Aggregator(nn.Module):
@@ -45,10 +145,15 @@ class GeometricControlNet(nn.Module):
     def __init__(
         self,
         unet,
-        num_control_channels=7,
+        num_control_channels=6,  # num_control_channels는 카메라 포즈와 같은 제어 입력의 채널 수 (여기서는 rotation(3) + translation(3))
         num_views=3,
         aggregation_method="attention",
         warp_last_n_stages=2,
+        input_channels=3,
+        output_channels=64,
+        num_blocks=5,
+        base_channels=32,
+        channel_multiplier=2,
     ):
         super().__init__()
         self.unet = unet
@@ -61,23 +166,44 @@ class GeometricControlNet(nn.Module):
 
         # Create control net layers
         self.control_layers = nn.ModuleList(
-            [self._make_control_block(num_control_channels + 4, 320)]  # 4 for RGBD
-            + [self._make_control_block(320, 320) for _ in range(11)]
+            [
+                self._make_control_block(
+                    num_control_channels + input_channels, base_channels
+                )
+            ]
+            + [
+                self._make_control_block(
+                    base_channels * (channel_multiplier**i),
+                    base_channels * (channel_multiplier ** (i + 1)),
+                )
+                for i in range(num_blocks - 1)
+            ]
         )
 
         # Zero convolutions
         self.zero_convs_in = nn.ModuleList(
-            [self._make_zero_conv(320) for _ in range(12)]
+            [
+                self._make_zero_conv(base_channels * (channel_multiplier**i))
+                for i in range(num_blocks)
+            ]
         )
         self.zero_convs_out = nn.ModuleList(
-            [self._make_zero_conv(320) for _ in range(12)]
+            [
+                self._make_zero_conv(base_channels * (channel_multiplier**i))
+                for i in range(num_blocks)
+            ]
         )
 
         # Epipolar Warp Operator
-        self.epipolar_warp = EpipolarWarpOperator(320)
+        self.epipolar_warp = EpipolarWarpOperator(
+            base_channels * (channel_multiplier ** (num_blocks - 1))
+        )
 
         # Aggregator
-        self.aggregator = Aggregator(320, method=aggregation_method)
+        self.aggregator = Aggregator(
+            base_channels * (channel_multiplier ** (num_blocks - 1)),
+            method=aggregation_method,
+        )
 
     def add_noise(self, x, t):
         noise = torch.randn_like(x)
@@ -108,9 +234,11 @@ class GeometricControlNet(nn.Module):
         condition_view,
         target_view,
         timestep,
-        camera_poses,
+        camera_params,
         encoder_hidden_states=None,
     ):
+        extrinsic_params = camera_params[:, :6]
+        intrinsic_params = camera_params[:, 6:]
         batch_size, _, height, width = target_view.shape
         if encoder_hidden_states is None:
             encoder_hidden_states = torch.zeros(batch_size, 77, 768, device=x.device)
@@ -142,6 +270,8 @@ class GeometricControlNet(nn.Module):
                         x,
                         camera_poses[:, view_idx],
                         camera_poses[:, (view_idx + 1) % self.num_views],
+                        camera_intrinsics[:, view_idx],
+                        camera_intrinsics[:, (view_idx + 1) % self.num_views],
                     )
                 x = zero_conv_out(x)
                 view_control_outputs.append(x)
@@ -200,5 +330,6 @@ if __name__ == "__main__":
     x = torch.randn(1, 4, 64, 64)
     timestep = torch.tensor([500])
     camera_poses = torch.randn(1, 3, 7)  # (batch, num_views, 7)
+    camera_intrinsics = torch.randn(1, 3, 3, 3)
     output = model(x, timestep, camera_poses)
     print(f"Output shape: {output.shape}")

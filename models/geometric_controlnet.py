@@ -231,53 +231,54 @@ class GeometricControlNet(nn.Module):
 
     def forward(
         self,
-        condition_view,
-        target_view,
-        timestep,
-        camera_params,
-        encoder_hidden_states=None,
+        source_image, target_image, timestep, source_camera_pose, target_camera_pose, source_camera_intrinsic, target_camera_intrinsic
     ):
-        extrinsic_params = camera_params[:, :6]
-        intrinsic_params = camera_params[:, 6:]
-        batch_size, _, height, width = target_view.shape
-        if encoder_hidden_states is None:
-            encoder_hidden_states = torch.zeros(batch_size, 77, 768, device=x.device)
+        condition = source_image
+        camera_params = torch.cat([source_camera_pose, target_camera_pose, source_camera_intrinsic.flatten(), target_camera_intrinsic.flatten()], dim=1)
+    
+        batch_size, _, height, width = target_image.shape
+        
+        # 빈 텍스트에 대한 임베딩 생성 (모든 요소가 0인 텐서)
+        empty_text_embeds = torch.zeros(batch_size, 77, 768, device=target_image.device)
 
-        # Extract features from target view using frozen SD encoder
+
+        # Extract features from target view
         with torch.no_grad():
-            target_features = self.unet.down_blocks(
-                target_view, timestep, encoder_hidden_states=encoder_hidden_states
-            )
+            target_features = self.unet.down_blocks(target_image, timestep, encoder_hidden_states=empty_text_embeds)
+
 
         control_outputs = []
+        
+        # 첫번째 이미지를 source camera로 잡고 나머지 이미지는 target camera로 처리하여 zero conv in, control layer, zero conv out을 통과
+        
         for view_idx in range(self.num_views):
-            camera_pose = (
-                camera_poses[:, view_idx]
-                .view(batch_size, -1, 1, 1)
-                .repeat(1, 1, height, width)
-            )
-            x = torch.cat([condition_view[:, view_idx], camera_pose], dim=1)
+            if view_idx == 0:
+                camera_pose = source_camera_pose
+            else:
+                camera_pose = target_camera_pose
+            
+            camera_pose = camera_pose.view(batch_size, -1, 1, 1).repeat(1, 1, height, width)
+            x = torch.cat([condition, camera_pose], dim=1)
             view_control_outputs = []
             for i, (control_layer, zero_conv_in, zero_conv_out) in enumerate(
                 zip(self.control_layers, self.zero_convs_in, self.zero_convs_out)
             ):
                 x = zero_conv_in(x)
                 x = control_layer(x)
-                if (
-                    i >= num_stages - self.warp_last_n_stages
-                ):  # 마지막 self.warp_last_n_stages 개수의 단계에서만 warping 적용
+                if i >= len(self.control_layers) - self.warp_last_n_stages:
                     x = self.epipolar_warp(
                         x,
-                        camera_poses[:, view_idx],
-                        camera_poses[:, (view_idx + 1) % self.num_views],
-                        camera_intrinsics[:, view_idx],
-                        camera_intrinsics[:, (view_idx + 1) % self.num_views],
+                        source_camera_pose,
+                        target_camera_pose,
+                        source_camera_intrinsic,
+                        target_camera_intrinsic,
                     )
                 x = zero_conv_out(x)
                 view_control_outputs.append(x)
             control_outputs.append(view_control_outputs)
 
-        # Epipolar warping and aggregation (마지막 두 단계에만 적용)
+        # Epipolar warping and aggregation (마지막 두 단계에만 적용) 순서가 이게 맞는지 확인 필요. 지금은 conv out -> feature warping
+        
         num_stages = len(control_outputs[0])
         aggregated_controls = []
         for level in range(len(control_outputs[0])):

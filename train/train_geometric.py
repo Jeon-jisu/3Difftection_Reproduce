@@ -6,23 +6,15 @@ import torch.nn.functional as F
 from torch.optim.lr_scheduler import StepLR
 
 
-def train_geometric_controlnet(config):
+def train_geometric_controlnet(model, dataloader, optimizer, config, device):
     device = torch.device(config["device"])
 
-    # Load datasets
-    train_dataset = Omni3DDataset(
-        config["data"]["data_dir"], "ARKitScenes", "train", resolution=256
-    )
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset,
-        batch_size=config["training"]["batch_size"],
-        shuffle=True,
-        num_workers=config["num_workers"],
-    )
+    # Load loader
+    train_loader = dataloader
 
     # Initialize models
     unet = UNet2DConditionModel.from_pretrained(config["stable_diffusion_path"])
-    model = GeometricControlNet(
+    model = model(
         unet,
         num_views=config["model"]["num_views"],
         aggregation_method=config["model"]["aggregation_method"],
@@ -36,11 +28,7 @@ def train_geometric_controlnet(config):
     model.to(device)
 
     # Initialize optimizer and scheduler
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=config["training"]["learning_rate"],
-        weight_decay=config["training"]["weight_decay"],
-    )
+    optimizer = optimizer 
     scheduler = StepLR(
         optimizer,
         step_size=config["training"]["lr_scheduler"]["step_size"],
@@ -52,9 +40,12 @@ def train_geometric_controlnet(config):
     for epoch in range(config["training"]["num_epochs"]):
         for batch_idx, batch in enumerate(train_loader):
             # Prepare input
-            target_view = batch["image"].to(device)
-            camera_poses = batch["camera_pose"].to(device)
-            camera_intrinsics = batch["camera_intrinsics"].to(device)  # 추가
+            source_image = batch["source_image"].to(device)
+            target_image = batch["target_image"].to(device)
+            source_camera_pose = batch["source_camera_pose"].to(device)
+            target_camera_pose = batch["target_camera_pose"].to(device)
+            source_camera_intrinsic = batch["source_camera_intrinsic"].to(device)
+            target_camera_intrinsic = batch["target_camera_intrinsic"].to(device)
 
             # Sample noise and add to images
             noise = torch.randn_like(target_view)
@@ -64,11 +55,18 @@ def train_geometric_controlnet(config):
                 (target_view.shape[0],),
                 device=target_view.device,
             ).long()
-            noisy_images = noise_scheduler.add_noise(target_view, noise, timesteps)
+            noisy_target_images = noise_scheduler.add_noise(target_image, noise, timesteps)
 
             # Forward pass
-            noise_pred = model(noisy_images, timesteps, camera_poses, camera_intrinsics)
-
+            noise_pred = model(
+                source_image,
+                noisy_target_images,
+                timesteps,
+                source_camera_pose,
+                target_camera_pose,
+                source_camera_intrinsic,
+                target_camera_intrinsic
+            )
             # Compute loss
             loss = F.mse_loss(noise_pred, noise)
 
@@ -86,6 +84,8 @@ def train_geometric_controlnet(config):
                 )
         # Step the learning rate scheduler
         scheduler.step()
+        
+        # Save checkpoint
         if (epoch + 1) % config["logging"]["save_interval"] == 0:
             torch.save(model.state_dict(), f"{config['save_path']}_epoch{epoch+1}.pth")
 

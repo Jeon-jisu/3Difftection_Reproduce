@@ -3,7 +3,6 @@ import torch.nn as nn
 from diffusers import UNet2DConditionModel
 import torch.nn.functional as F
 
-
 class EpipolarWarpOperator(nn.Module):
     def __init__(self, channels):
         super().__init__()
@@ -213,16 +212,24 @@ class GeometricControlNet(nn.Module):
 
     def extract_features(self, x, timestep, text_embeds):
         # Stable Diffusion의 UNet을 사용하여 특징 추출
-        down_block_res_samples, mid_block_res_sample = self.unet.down_blocks(
-            x, timestep, encoder_hidden_states=text_embeds
-        )
+        down_block_res_samples, mid_block_res_sample = self._forward_down_blocks(x, timestep, encoder_hidden_states=text_embeds)
         return down_block_res_samples
 
+    def _forward_down_blocks(self, x, timestep, encoder_hidden_states):
+        down_block_res_samples = []
+        for down_block in self.unet.down_blocks:
+            x, res_samples = down_block(x, timestep, encoder_hidden_states=encoder_hidden_states)
+            down_block_res_samples.append(res_samples)
+        return down_block_res_samples, x
+
     def _make_control_block(self, in_channels, out_channels):
+        num_groups = min(32, in_channels)  # 그룹의 수를 입력 채널 수의 최소값으로 설정
         return nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
+            nn.GroupNorm(num_groups=num_groups, num_channels=out_channels),
             nn.SiLU(),
             nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+            nn.GroupNorm(num_groups=num_groups, num_channels=out_channels),
             nn.SiLU(),
         )
 
@@ -231,10 +238,12 @@ class GeometricControlNet(nn.Module):
 
     def forward(
         self,
-        source_image, target_image, timestep, source_camera_pose, target_camera_pose, source_camera_intrinsic, target_camera_intrinsic
+        source_image, target_image, timestep, source_camera_pose, target_camera_pose, source_image_timestamp, target_image_timestamp, source_camera_intrinsic, target_camera_intrinsic
     ):
         condition = source_image
-        camera_params = torch.cat([source_camera_pose, target_camera_pose, source_camera_intrinsic.flatten(), target_camera_intrinsic.flatten()], dim=1)
+        print("source_camera_intrinsic",source_camera_intrinsic)
+        print("source_camera_intrinsic.flatten()",source_camera_intrinsic.flatten())
+        camera_params = torch.cat([source_camera_pose, target_camera_pose, source_camera_intrinsic.flatten(start_dim=1), target_camera_intrinsic.flatten(start_dim=1)], dim=1)
     
         batch_size, _, height, width = target_image.shape
         
@@ -244,8 +253,7 @@ class GeometricControlNet(nn.Module):
 
         # Extract features from target view
         with torch.no_grad():
-            target_features = self.unet.down_blocks(target_image, timestep, encoder_hidden_states=empty_text_embeds)
-
+            target_features = self._forward_down_blocks(target_image, timestep, encoder_hidden_states=empty_text_embeds)
 
         control_outputs = []
         
@@ -321,16 +329,20 @@ class GeometricControlNet(nn.Module):
         # 최종 출력 생성
         return self.unet.conv_norm_out(hidden_states)
 
-
 # Example usage
 if __name__ == "__main__":
     unet = UNet2DConditionModel.from_pretrained(
-        "stabilityai/stable-diffusion-2-1-base", subfolder="unet"
+        "runwayml/stable-diffusion-v1-5"
     )
     model = GeometricControlNet(unet, num_views=3, aggregation_method="mean")
-    x = torch.randn(1, 4, 64, 64)
+    source_image = torch.randn(1, 4, 64, 64)
+    target_image = torch.randn(1, 4, 64, 64)
     timestep = torch.tensor([500])
-    camera_poses = torch.randn(1, 3, 7)  # (batch, num_views, 7)
-    camera_intrinsics = torch.randn(1, 3, 3, 3)
-    output = model(x, timestep, camera_poses)
+    source_camera_pose = torch.randn(1, 7)  # (batch, 7)
+    target_camera_pose = torch.randn(1, 7)
+    source_image_timestamp = torch.tensor([0])
+    target_image_timestamp = torch.tensor([1])
+    source_camera_intrinsic = torch.randn(1, 3, 3)
+    target_camera_intrinsic = torch.randn(1, 3, 3)
+    output = model(source_image, target_image, timestep, source_camera_pose, target_camera_pose, source_image_timestamp, target_image_timestamp, source_camera_intrinsic, target_camera_intrinsic)
     print(f"Output shape: {output.shape}")

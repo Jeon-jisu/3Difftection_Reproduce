@@ -30,11 +30,18 @@ def process_pincam_file(pincam_file):
         'principal_point_y': float(data[5])
     }
 
-def find_closest_timestamp(timestamp, pose_data, max_diff=1.0):
-    closest = min(pose_data.keys(), key=lambda x: abs(x - timestamp))
-    if abs(closest - timestamp) <= max_diff:
-        return closest
-    return None
+def find_closest_timestamp(timestamp, pose_data, max_diff=0.1):
+    # Filter out timestamps that are within the max_diff range
+    close_timestamps = [ts for ts in pose_data.keys() if abs(ts - timestamp) <= max_diff]
+    # print("close_timestamps",close_timestamps,"timestamp",timestamp)
+    # If no timestamps are within the max_diff range, return None
+    if not close_timestamps:
+        return None
+    
+    # Find the closest timestamp among the filtered timestamps
+    closest = min(close_timestamps, key=lambda x: abs(x - timestamp))
+    
+    return closest
 
 def create_annotation(base_path, exclude_video_id='41048181'):
     annotations = []
@@ -75,9 +82,9 @@ def create_annotation(base_path, exclude_video_id='41048181'):
         for i in range(0, len(png_files) - 1, 2):
             source_image = png_files[i]
             target_image = png_files[i + 1]
-            source_timestamp = round_to_3_decimal(float(source_image.split('_')[-1].split('.')[0]))
-            target_timestamp = round_to_3_decimal(float(target_image.split('_')[-1].split('.')[0]))
-            
+            source_timestamp = float(source_image.split('_')[-1].replace('.png', ''))
+            target_timestamp = float(target_image.split('_')[-1].replace('.png', ''))
+            print("source_timestamp",source_timestamp)
             source_closest = find_closest_timestamp(source_timestamp, pose_data)
             target_closest = find_closest_timestamp(target_timestamp, pose_data)
             
@@ -106,6 +113,8 @@ def create_annotation(base_path, exclude_video_id='41048181'):
                 "target_image": f"train/{video_id}/extract/{target_image}",
                 "source_camera_pose": source_pose['rotation'] + source_pose['translation'],
                 "target_camera_pose": target_pose['rotation'] + target_pose['translation'],
+                "source_image_timestamp":source_timestamp,
+                "target_image_timestamp":target_timestamp,
                 "source_camera_intrinsic": [
                     [source_intrinsics['focal_length_x'], 0, source_intrinsics['principal_point_x']],
                     [0, source_intrinsics['focal_length_y'], source_intrinsics['principal_point_y']],

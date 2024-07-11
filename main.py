@@ -15,6 +15,10 @@ def load_config(config_path):
     with open(config_path, "r") as f:
         return yaml.safe_load(f)
 
+def print_gpu_memory():
+    if torch.cuda.is_available():
+        print(f"GPU memory allocated: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
+        print(f"GPU memory reserved: {torch.cuda.memory_reserved() / 1024**2:.2f} MB")
 
 def get_dataset(dataset_type, config):
     if dataset_type == "geometric":
@@ -31,6 +35,16 @@ def get_dataset(dataset_type, config):
     #     )
     else:
         raise ValueError(f"Unknown dataset type: {dataset_type}")
+def get_model_size(model):
+    param_size = 0
+    for param in model.parameters():
+        param_size += param.nelement() * param.element_size()
+    buffer_size = 0
+    for buffer in model.buffers():
+        buffer_size += buffer.nelement() * buffer.element_size()
+    size_all_mb = (param_size + buffer_size) / 1024**2
+    return size_all_mb
+
 
 
 def get_model(model_type, config):
@@ -38,7 +52,11 @@ def get_model(model_type, config):
         unet = UNet2DConditionModel.from_pretrained(
             "stabilityai/stable-diffusion-2-1-base", subfolder="unet"
         )
-        return GeometricControlNet(**config["model"], unet=unet)
+        print(f"UNet model size: {get_model_size(unet):.2f} MB")
+        geometric_model = GeometricControlNet(**config["model"], unet=unet)
+        print(f"GeometricControlNet model size: {get_model_size(geometric_model):.2f} MB")
+        
+        return geometric_model
     # elif model_type == "semantic":
     #     return SemanticControlNet(**config["model"])
     # elif model_type == "head_detection":
@@ -48,6 +66,7 @@ def get_model(model_type, config):
 
 
 def train(args):
+    torch.cuda.empty_cache()
     config = load_config(args.config)
     device = torch.device(args.device)
 
@@ -59,14 +78,22 @@ def train(args):
         shuffle=True,
         num_workers=config["num_workers"],
     )
-    model = get_model(args.model, config).to(device)
-
+    print("모델 로드 전")
+    print_gpu_memory()
+    print("모델 로드 중")
+    model = get_model(args.model, config)
+    
+    print_gpu_memory()
+    print("GPU로 모델 이동")
+    model = model.half()
+    model = model.to(device)
+    print_gpu_memory()
     # Set up optimizer
     optimizer = torch.optim.AdamW(model.parameters(), lr=config["training"]["learning_rate"],weight_decay=config["training"]["weight_decay"])
 
     # Train the model
     if args.model == "geometric":
-        train_geometric_controlnet(model, dataloader, optimizer, config, device)
+        train_geometric_controlnet(model, dataloader, optimizer, config , device)
     # elif args.model == "semantic":
     #     train_semantic_controlnet(model, dataloader, optimizer, config, device)
     # elif args.model == "head_detection":

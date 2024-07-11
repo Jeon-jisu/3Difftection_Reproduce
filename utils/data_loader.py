@@ -43,16 +43,24 @@ class Omni3DDataset(Dataset):
         # 카메라 포즈 및 내부 파라미터 로드
         source_camera_pose = torch.tensor(ann["source_camera_pose"])
         target_camera_pose = torch.tensor(ann["target_camera_pose"])
+        source_image_timestamp = torch.tensor(ann["source_image_timestamp"])
+        target_image_timestamp = torch.tensor(ann["target_image_timestamp"])
         source_camera_intrinsic = torch.tensor(ann["source_camera_intrinsic"])
         target_camera_intrinsic = torch.tensor(ann["target_camera_intrinsic"])
+        
+        timestep = torch.abs(target_image_timestamp - source_image_timestamp)
+
         
         return {
             "source_image": source_image,
             "target_image": target_image,
             "source_camera_pose": source_camera_pose,
             "target_camera_pose": target_camera_pose,
+            "source_image_timestamp":source_image_timestamp,
+            "target_image_timestamp":target_image_timestamp,
             "source_camera_intrinsic": source_camera_intrinsic,
             "target_camera_intrinsic": target_camera_intrinsic,
+            "timestep": timestep,
         }
 
 

@@ -2,10 +2,10 @@
 __pycache__/
 *.py[cod]
 *$py.class
-ControlNetv2/training
+# ControlNetv2/training
 # C extensions
 *.so
-
+training/
 # Distribution / packaging
 .Python
 build/

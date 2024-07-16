@@ -48,7 +48,7 @@ def create_annotation(base_path, exclude_video_id='41048181'):
     processed_videos = 0
     skipped_videos = 0
     
-    train_path = os.path.join(base_path, 'processed', 'geometric', 'train')
+    train_path = os.path.join('Training')
     
     if not os.path.exists(train_path):
         print(f"Error: The path {train_path} does not exist.")

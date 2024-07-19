@@ -2,7 +2,15 @@
 __pycache__/
 *.py[cod]
 *$py.class
-
+ControlNet/raw
+ControlNet/test_imgs
+ControlNet/testraw
+ControlNet/checkpoints 
+ControlNet2/raw
+ControlNet2/test_imgs
+ControlNet2/testraw
+ControlNet2/checkpoints 
+ControlNet2/wandb
 # C extensions
 *.so
 

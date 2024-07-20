@@ -23,6 +23,23 @@ class ImageLogger(Callback):
         self.log_on_batch_idx = log_on_batch_idx
         self.log_images_kwargs = log_images_kwargs if log_images_kwargs else {}
         self.log_first_step = log_first_step
+        
+    def combine_images(self, images):
+        # 모든 이미지를 하나의 큰 그리드로 결합
+        all_grids = []
+        for k in images:
+            if k == "conditioning":
+                continue
+            grid = torchvision.utils.make_grid(images[k], nrow=4)
+            if self.rescale:
+                grid = (grid + 1.0) / 2.0
+            all_grids.append(grid)
+        
+        combined = torchvision.utils.make_grid(all_grids, nrow=1)
+        combined = combined.transpose(0, 1).transpose(1, 2).squeeze(-1)
+        combined = combined.numpy()
+        combined = (combined * 255).astype(np.uint8)
+        return combined
 
     @rank_zero_only
     def log_local(self, save_dir, split, images, global_step, current_epoch, batch_idx):

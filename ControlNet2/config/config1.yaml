@@ -1,0 +1,31 @@
+# WandB settings
+wandb_project: '3difftection'
+wandb_name: 'train_v5_logging_setting'
+
+# Training settings
+resume_path: './models/control_sd15_customv2.ckpt'
+batch_size: 4
+logger_freq: 1000
+learning_rate: 1e-5
+sd_locked: true
+only_mid_control: false
+max_epochs: 3000
+
+# Model settings
+model_config_path: './models/cldm_v15v2.yaml'
+
+# Dataset settings
+base_dir: '/node_data/urp24s_jsjeon/3Difftection_Reproduce/ControlNet2/raw/'
+annotation_file: '/node_data/urp24s_jsjeon/3Difftection_Reproduce/ControlNet2/raw/annotations.json'
+
+# Checkpoint settings
+checkpoint_dir: './checkpoints'
+checkpoint_filename: 'model-{epoch:02d}-{train_loss:.2f}'
+checkpoint_save_top_k: 1
+checkpoint_every_n_epochs: 10
+
+# Hardware settings
+num_workers: 127
+accelerator: 'gpu'
+devices: 1
+precision: 32

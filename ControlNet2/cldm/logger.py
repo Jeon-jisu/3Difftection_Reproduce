@@ -9,7 +9,7 @@ from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
 
 class ImageLogger(Callback):
-    def __init__(self, batch_frequency=2000, max_images=4, clamp=True, increase_log_steps=True,
+    def __init__(self, batch_frequency=4000, max_images=4, clamp=True, increase_log_steps=True,
                  rescale=True, disabled=False, log_on_batch_idx=False, log_first_step=False,
                  log_images_kwargs=None):
         super().__init__()
@@ -43,7 +43,30 @@ class ImageLogger(Callback):
             Image.fromarray(grid).save(path)
             # WandB에 이미지 로깅
             wandb.log({f"{split}_{k}": wandb.Image(grid)}, step=global_step)
+            
+    @rank_zero_only
+    def log_fixed_images(self, pl_module, batch, current_epoch):
+        if self.fixed_images is None:
+            self.fixed_images = batch[:min(4, len(batch))]
 
+        with torch.no_grad():
+            images = pl_module.log_images(self.fixed_images, split="fixed", **self.log_images_kwargs)
+
+        for k in images:
+            if k == "conditioning":
+                continue
+            grid = torchvision.utils.make_grid(images[k], nrow=4)
+            if self.rescale:
+                grid = (grid + 1.0) / 2.0
+            grid = grid.transpose(0, 1).transpose(1, 2).squeeze(-1)
+            grid = grid.numpy()
+            grid = (grid * 255).astype(np.uint8)
+            filename = f"fixed_{k}_epoch-{current_epoch:04d}.png"
+            path = os.path.join(pl_module.logger.save_dir, "image_log", "fixed", filename)
+            os.makedirs(os.path.split(path)[0], exist_ok=True)
+            Image.fromarray(grid).save(path)
+            wandb.log({f"fixed_{k}": wandb.Image(grid)}, step=current_epoch)
+            
     def log_img(self, pl_module, batch, batch_idx, split="train"):
         check_idx = batch_idx  # if self.log_on_batch_idx else pl_module.global_step
         if (self.check_frequency(check_idx) and  # batch_idx % self.batch_freq == 0

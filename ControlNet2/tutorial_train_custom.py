@@ -38,6 +38,7 @@ checkpoint_callback = ModelCheckpoint(
     filename='model-{epoch:02d}-{train_loss:.2f}',  # 체크포인트 파일 이름
     save_top_k=1,  # 가장 좋은 k개의 체크포인트만 저장
     mode='min',  # 모니터링할 메트릭이 낮을수록 좋은 경우 'min'
+    every_n_epochs=10,
     save_last=True  # 마지막 체크포인트도 저장
 )
 

@@ -2,18 +2,21 @@
 __pycache__/
 *.py[cod]
 *$py.class
-ControlNet/raw
-ControlNet/test_imgs
-ControlNet/testraw
-ControlNet/checkpoints 
 ControlNet2/raw
 ControlNet2/test_imgs
 ControlNet2/testraw
 ControlNet2/checkpoints 
 ControlNet2/wandb
+ControlNet2/image_log
+ControlNet2/models
+oldver/configs 
+.DS_Store
+Training/
+testraw
+annotation.json
 # C extensions
 *.so
-
+data/
 # Distribution / packaging
 .Python
 build/

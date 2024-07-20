@@ -42,9 +42,9 @@ class GeometryDataset(Dataset):
         source = cv2.cvtColor(source, cv2.COLOR_BGR2RGB)
         target = cv2.cvtColor(target, cv2.COLOR_BGR2RGB)
         
-        # TODO : 정규화 범위 different 이슈 일단 둘다 -1~1로 변경
-        # Normalize source images to [-1, 1].
-        source = (source.astype(np.float32) / 127.5) - 1.0
+        # TODO : 정규화 범위 different 이슈
+        # Normalize source images to [0, 1].
+        source = source.astype(np.float32) / 255.0
         # Normalize target images to [-1, 1].
         target = (target.astype(np.float32) / 127.5) - 1.0
 

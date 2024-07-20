@@ -1,6 +1,6 @@
 # WandB settings
 wandb_project: '3difftection'
-wandb_name: 'train_v5_logging_setting'
+wandb_name: 'train_v7_logging_setting'
 
 # Training settings
 resume_path: './models/control_sd15_customv2.ckpt'

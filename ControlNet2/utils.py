@@ -13,4 +13,5 @@ def load_config(config_path):
     config['num_workers'] = int(config['num_workers'])
     config['devices'] = int(config['devices'])
     config['precision'] = int(config['precision'])
+    config['specific_image_indices'] = [int(x) for x in config['specific_image_indices']]
     return config

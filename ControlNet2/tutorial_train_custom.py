@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 from custom_dataset import GeometryDataset
 from cldm.logger import ImageLogger
 from cldm.model import create_model, load_state_dict
-from cldm.cldm import ControlLDM, EpipolarWarpOperator, ModifiedControlNet
+from cldm.cldm import ControlLDM, EpipolarWarpOperator
 from pytorch_lightning.callbacks import ModelCheckpoint
 import torch.nn as nn
 import wandb
@@ -20,6 +20,12 @@ from pytorch_lightning.loggers import WandbLogger
 from utils import load_config
 import argparse
 import os
+
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1" 
 
 def main(config_path):
     config = load_config(config_path)
@@ -35,24 +41,25 @@ def main(config_path):
     model.learning_rate = config['learning_rate']
     model.sd_locked = config['sd_locked']
     model.only_mid_control = config['only_mid_control']
-
+    checkpoint_dir = os.path.join(config['checkpoint_dir'], config['wandb_name'])
+    os.makedirs(checkpoint_dir, exist_ok=True)
     # ModelCheckpoint callback
     checkpoint_callback = ModelCheckpoint(
         monitor='train_loss',
-        dirpath= os.path.join(config['checkpoint_dir'], config['wandb_name']),
+        dirpath= checkpoint_dir,
         filename=config['checkpoint_filename'],
         save_top_k=config['checkpoint_save_top_k'],
         mode='min',
         every_n_epochs=config['checkpoint_every_n_epochs'],
-        save_last=True
+        save_last=False,
+        verbose=True,
     )
 
     # Misc
     dataset = GeometryDataset(config['annotation_file'], config['base_dir'])
     dataloader = DataLoader(dataset, num_workers=config['num_workers'], batch_size=config['batch_size'], shuffle=True)
-
     # Logger
-    logger = ImageLogger(config, batch_frequency=config['logger_freq'])
+    logger = ImageLogger(config, batch_frequency=config['logger_freq'],specific_image_indices=config['specific_image_indices'])
 
     # Trainer
     trainer = pl.Trainer(

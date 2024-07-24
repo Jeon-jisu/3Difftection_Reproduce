@@ -1,6 +1,6 @@
 # WandB settings
 wandb_project: '3difftection'
-wandb_name: 'train_v7_logging_setting'
+wandb_name: 'train_v18_logging_resetdebug'
 
 # Training settings
 resume_path: './models/control_sd15_customv2.ckpt'
@@ -21,7 +21,7 @@ annotation_file: '/node_data/urp24s_jsjeon/3Difftection_Reproduce/ControlNet2/ra
 # Checkpoint settings
 checkpoint_dir: './checkpoints'
 checkpoint_filename: 'model-{epoch:02d}-{train_loss:.2f}'
-checkpoint_save_top_k: 1
+checkpoint_save_top_k: -1
 checkpoint_every_n_epochs: 10
 
 # Hardware settings
@@ -29,3 +29,6 @@ num_workers: 127
 accelerator: 'gpu'
 devices: 1
 precision: 32
+
+# Image Logging
+specific_image_indices: [0, 1, 2,3] 

@@ -32,6 +32,12 @@ class GeometryDataset(Dataset):
         return len(self.data)
 
     def __getitem__(self, idx):
+        if isinstance(idx, slice):
+            return [self.get_item(i) for i in range(*idx.indices(len(self)))]
+        else:
+            return self.get_item(idx)
+        
+    def get_item(self, idx):
         item = self.data[idx]
 
         # Load images
@@ -61,5 +67,7 @@ class GeometryDataset(Dataset):
             'target_camera_pose': target_camera_pose,
             'source_camera_intrinsic': source_camera_intrinsic,
             'target_camera_intrinsic': target_camera_intrinsic,
-            'txt':''
+            'txt':'',
+            'hint_path': item['hint'], 
+            'jpg_path': item['jpg']   
         }

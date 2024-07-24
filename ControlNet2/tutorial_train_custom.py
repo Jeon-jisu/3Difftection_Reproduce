@@ -1,7 +1,7 @@
 """
 
 다음과 같은 명령어로 실행시킬 수 있습니다. 
-python train.py --config config/config1.yaml
+python tutorial_train_custom.py --config config/config1.yaml
 
 """
 
@@ -45,10 +45,11 @@ def main(config_path):
     os.makedirs(checkpoint_dir, exist_ok=True)
     # ModelCheckpoint callback
     checkpoint_callback = ModelCheckpoint(
-        monitor='train_loss',
+        monitor='train/loss_simple',
         dirpath= checkpoint_dir,
         filename=config['checkpoint_filename'],
-        save_top_k=config['checkpoint_save_top_k'],
+        save_top_k = 10,
+        # save_top_k=config['checkpoint_save_top_k'],
         mode='min',
         every_n_epochs=config['checkpoint_every_n_epochs'],
         save_last=False,

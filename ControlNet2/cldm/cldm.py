@@ -22,7 +22,8 @@ from ldm.models.diffusion.ddim import DDIMSampler
 class EpipolarWarpOperator(nn.Module):
     def __init__(self):
         super(EpipolarWarpOperator, self).__init__()
-        self.conv1 = nn.Conv2d(in_channels=320, out_channels=320, kernel_size=3, stride=1, padding=1)
+        self.conv1 = None
+        # self.conv1 = nn.Conv2d(in_channels=320, out_channels=320, kernel_size=3, stride=1, padding=1)
         self.relu = nn.ReLU()
         
     def forward(self, x, source_intrinsics, target_intrinsics, source_pose, target_pose):
@@ -32,6 +33,8 @@ class EpipolarWarpOperator(nn.Module):
         source_pose = source_pose.to(dtype)
         target_pose = target_pose.to(dtype)
         batch_size, channels, height, width = x.size()
+        if self.conv1 is None or self.conv1.in_channels != channels:
+            self.conv1 = nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=3, stride=1, padding=1).to(x.device)
         
         # Compute fundamental matrix for each sample in the batch
         F_batch = self.compute_fundamental_matrix_batch(source_intrinsics, target_intrinsics, source_pose, target_pose)
@@ -63,7 +66,7 @@ class EpipolarWarpOperator(nn.Module):
             R_target = self.rotation_vector_to_matrix(target_pose[i, :3])
             t_target = target_pose[i, 3:].unsqueeze(1)
             
-            R_relative = torch.mm(R_source, R_target.t())
+            R_relative = torch.mm(R_source.t(), R_target)
             t_relative = t_source - torch.mm(R_relative, t_target)
             
             E = torch.mm(self.skew_symmetric(t_relative.squeeze()), R_relative)
@@ -146,7 +149,7 @@ class EpipolarWarpOperator(nn.Module):
 class ControlledUnetModel(UNetModel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.epipolar_warp = EpipolarWarpOperator()
+        
     def forward(self, x, timesteps=None, context=None, control=None, only_mid_control=False, source_pose=None, target_pose=None, source_intrinsic=None, target_intrinsic=None, **kwargs):
         hs = []
         # 이 부분은 Frozen된 SD의 부분인듯. 
@@ -176,8 +179,7 @@ class ControlledUnetModel(UNetModel):
             h = module(h, emb, context)
             # print(f"After concatenation, h shape: {h.shape}")
             # Apply epipolar warping only to the last two decoder blocks
-            # if i >= len(self.output_blocks) - 2:
-            #     h = self.epipolar_warp(h, source_intrinsic, target_intrinsic, source_pose, target_pose)
+            
             # print(f"After epipolar_warp, h shape: {h.shape}")
         h = h.type(x.dtype)
         return self.out(h)
@@ -415,11 +417,12 @@ class ControlNet(nn.Module):
         )
         self.middle_block_out = self.make_zero_conv(ch)
         self._feature_size += ch
+        self.epipolar_warp = EpipolarWarpOperator()
 
     def make_zero_conv(self, channels):
         return TimestepEmbedSequential(zero_module(conv_nd(self.dims, channels, channels, 1, padding=0)))
 
-    def forward(self, x, hint, timesteps, context, **kwargs):
+    def forward(self, x, hint, timesteps, context, source_pose=None, target_pose=None, source_intrinsic=None, target_intrinsic=None,**kwargs):
         t_emb = timestep_embedding(timesteps, self.model_channels, repeat_only=False)
         emb = self.time_embed(t_emb)
 
@@ -435,6 +438,8 @@ class ControlNet(nn.Module):
                 guided_hint = None # 첫번째 encoder block에서만 통합하여 들어간다. 
             else:
                 h = module(h, emb, context)
+            # print("epipolar로 잘 전달되는지 확인",target_pose[-1])
+            h = self.epipolar_warp(h, source_intrinsic, target_intrinsic, source_pose, target_pose)
             outs.append(zero_conv(h, emb, context))
 
         h = self.middle_block(h, emb, context)
@@ -493,7 +498,8 @@ class ControlLDM(LatentDiffusion):
             # print("Debug - target_pose:", target_pose)
             # print("Debug - source_intrinsic:", source_intrinsic)
             # print("Debug - target_intrinsic:", target_intrinsic)
-            control = self.control_model(x=x_noisy, hint=torch.cat(cond['c_concat'], 1), timesteps=t, context=cond_txt)
+            control = self.control_model(x=x_noisy, hint=torch.cat(cond['c_concat'], 1), timesteps=t, context=cond_txt,source_pose=source_pose, target_pose=target_pose, 
+                                  source_intrinsic=source_intrinsic, target_intrinsic = target_intrinsic)
             control = [c * scale for c, scale in zip(control, self.control_scales)]
             eps = diffusion_model(x=x_noisy, timesteps=t, context=cond_txt, control=control, only_mid_control=self.only_mid_control,source_pose=source_pose, target_pose=target_pose, 
                                   source_intrinsic=source_intrinsic, target_intrinsic = target_intrinsic)

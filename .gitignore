@@ -9,7 +9,7 @@ ControlNet2/checkpoints
 ControlNet2/wandb
 ControlNet2/image_log
 ControlNet2/models
-oldver/configs 
+oldver/configs testControlNet2/epipolartest
 .DS_Store
 Training/
 testraw
@@ -18,6 +18,11 @@ testControlNet2/
 testControlNet/
 rawtest/
 oldver/
+datasets/
+*.png
+*.pincam
+*.csv
+*.traj
 # C extensions
 *.so
 data/

@@ -6,6 +6,7 @@ import torchvision
 from PIL import Image
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
+import json
 
 class ImageLogger(Callback):
     def __init__(self, config, batch_frequency=1, logger_frequency=1000, max_images=4, clamp=True, increase_log_steps=True,
@@ -25,17 +26,20 @@ class ImageLogger(Callback):
         self.log_on_batch_idx = log_on_batch_idx
         self.log_images_kwargs = log_images_kwargs if log_images_kwargs else {}
         self.fixed_indices = [1,100,1000,1020]
-        self.open_image = [
-            "/node_data/urp24s_jsjeon/3Difftection_Reproduce/ControlNet2/raw/train/48458556/extract/48458556_128057.936.png",#random
-            "/node_data/urp24s_jsjeon/3Difftection_Reproduce/ControlNet2/raw/train/45663340/extract/45663340_78671.013.png",#random
-            "/node_data/urp24s_jsjeon/3Difftection_Reproduce/ControlNet2/raw/train/47333144/extract/47333144_40452.236.png",#random
-            "/node_data/urp24s_jsjeon/3Difftection_Reproduce/ControlNet2/raw/train/47334317/extract/47334317_67801.639.png",#random
-            "/node_data/urp24s_jsjeon/3Difftection_Reproduce/ControlNet2/raw/train/40753679/extract/40753679_6839.209.png",#pick
-            "/node_data/urp24s_jsjeon/3Difftection_Reproduce/ControlNet2/raw/train/40958767/extract/40958767_2178.966.png",#pick
-            "/node_data/urp24s_jsjeon/3Difftection_Reproduce/ControlNet2/raw/train/41048249/extract/41048249_4111.863.png",#pick
-            "/node_data/urp24s_jsjeon/3Difftection_Reproduce/ControlNet2/raw/train/43649391/extract/43649391_11042.421.png"#pick
-        ]
-
+        self.open_image = self.get_open_images_from_annotation(config['base_dir'], config['annotation_file'])
+    def get_open_images_from_annotation(self, base_path, annotation_file):
+        with open(annotation_file, 'r') as f:
+            data = json.load(f)
+        
+        # 처음 8개의 고유한 source_image 경로를 추출
+        unique_source_images = []
+        for item in data:
+            if 'source_image' in item and item['source_image'] not in unique_source_images:
+                unique_source_images.append( base_path + item['source_image'])
+                if len(unique_source_images) == 8:
+                    break
+        
+        return unique_source_images
     def combine_images(self, images):
         # 모든 이미지를 하나의 큰 그리드로 결합
         all_grids = []
@@ -101,29 +105,20 @@ class ImageLogger(Callback):
         # print("log_img")
         if not self.disabled:
             # open_image 리스트에 있는 이미지만 선택
-            # print("batch['hint_path']",batch['hint_path'])
             selected_indices = [i for i, path in enumerate(batch['hint_path']) if path in self.open_image]
-            # print("not self.disabled")
-            # print("selected_indices",selected_indices)
             if not selected_indices:
-                # print("not selected_indices")
                 return
             is_train = pl_module.training
             if is_train:
                 pl_module.eval()
-                # print("logging이 되어야하는디")
-
             with torch.no_grad():
                 # 고정된 인덱스의 이미지 가져오기
                 selected_batch = {k: v[selected_indices] if isinstance(v, torch.Tensor) else [v[i] for i in selected_indices] for k, v in batch.items()}
-                # print("selected_batch",selected_batch)
                 # Ensure intrinsics are included
                 if 'source_camera_intrinsic' in batch:
                     selected_batch['source_camera_intrinsic'] = batch['source_camera_intrinsic'][selected_indices]
-                    # print("source_camera_intrinsic 저장완")
                 if 'target_camera_intrinsic' in batch:
                     selected_batch['target_camera_intrinsic'] = batch['target_camera_intrinsic'][selected_indices]
-                    # print("target_camera_intrinsic 저장완")
                 
                     images = pl_module.log_images(selected_batch, split=split, **self.log_images_kwargs)
 

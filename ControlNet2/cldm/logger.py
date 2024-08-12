@@ -30,10 +30,10 @@ class ImageLogger(Callback):
     def get_open_images_from_annotation(self, base_path, annotation_file):
         with open(annotation_file, 'r') as f:
             data = json.load(f)
-        
+        sorted_data = sorted(data, key=lambda x: x.get('source_image', ''))
         # 처음 8개의 고유한 source_image 경로를 추출
         unique_source_images = []
-        for item in data:
+        for item in sorted_data:
             if 'source_image' in item and item['source_image'] not in unique_source_images:
                 unique_source_images.append( base_path + item['source_image'])
                 if len(unique_source_images) == 8:

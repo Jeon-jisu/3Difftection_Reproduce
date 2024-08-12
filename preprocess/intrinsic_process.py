@@ -21,26 +21,29 @@ def read_sky_directions():
 def adjust_and_rotate_params(width, height, fx, fy, cx, cy, direction):
     original_width, original_height = width, height
     new_width, new_height = 256, 256
+    rotated_width, rotated_height = original_width, original_height
+    rotated_fx, rotated_fy = fx, fy
+    rotated_cx, rotated_cy = cx, cy
     
     # 회전 적용 (원본 크기 기준)
-    if direction == "Up":
-        rotated_width, rotated_height = original_width, original_height
-        rotated_fx, rotated_fy = fx, fy
-        rotated_cx, rotated_cy = cx, cy
-    elif direction == "Right":
-        rotated_width, rotated_height = original_height, original_width
-        rotated_fx, rotated_fy = fy, fx
-        rotated_cx, rotated_cy = original_height - cy, cx
-    elif direction == "Down":
-        rotated_width, rotated_height = original_width, original_height
-        rotated_fx, rotated_fy = fx, fy
-        rotated_cx, rotated_cy = original_width - cx, original_height - cy
-    elif direction == "Left":
-        rotated_width, rotated_height = original_height, original_width
-        rotated_fx, rotated_fy = fy, fx
-        rotated_cx, rotated_cy = cy, original_width - cx
-    else:
-        raise ValueError(f"Unknown direction: {direction}")
+    # if direction == "Up":
+    #     rotated_width, rotated_height = original_width, original_height
+    #     rotated_fx, rotated_fy = fx, fy
+    #     rotated_cx, rotated_cy = cx, cy
+    # elif direction == "Right":
+    #     rotated_width, rotated_height = original_height, original_width
+    #     rotated_fx, rotated_fy = fy, fx
+    #     rotated_cx, rotated_cy = original_height - cy, cx
+    # elif direction == "Down":
+    #     rotated_width, rotated_height = original_width, original_height
+    #     rotated_fx, rotated_fy = fx, fy
+    #     rotated_cx, rotated_cy = original_width - cx, original_height - cy
+    # elif direction == "Left":
+    #     rotated_width, rotated_height = original_height, original_width
+    #     rotated_fx, rotated_fy = fy, fx
+    #     rotated_cx, rotated_cy = cy, original_width - cx
+    # else:
+    #     raise ValueError(f"Unknown direction: {direction}")
     
     # 크기 조정
     new_fx = rotated_fx * (new_width / rotated_width)
@@ -84,14 +87,8 @@ def process_all_video_folders(raw_dir):
                 continue
 
             input_dir = os.path.join(raw_dir, video_folder, 'extract_intrinsics')
-            old_output_dir = os.path.join(raw_dir, video_folder, 'extract_new_process_intrinsic2')
-            new_output_dir = os.path.join(raw_dir, video_folder, 'extract_new_process_intrinsic3')
+            new_output_dir = os.path.join(raw_dir, video_folder, 'extract_intrinsic_not_rotate')
             
-            # 기존 폴더 삭제
-            if os.path.exists(old_output_dir):
-                shutil.rmtree(old_output_dir)
-                print(f"Deleted old directory: {old_output_dir}")
-
             if os.path.exists(input_dir):
                 sky_direction = sky_directions.get(video_folder)
                 if sky_direction:
@@ -109,6 +106,6 @@ def process_all_video_folders(raw_dir):
         print("Completed a cycle. Waiting before next check...")
         time.sleep(300)  # 5분 대기
 
-base_path = "/node_data/urp24s_jsjeon/3Difftection_Reproduce/test"
+base_path = "/node_data/urp24s_jsjeon/3Difftection_Reproduce/ControlNet2/raw/Training"
 
 process_all_video_folders(base_path)

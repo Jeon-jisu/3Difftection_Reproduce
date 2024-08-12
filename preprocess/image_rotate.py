@@ -1,59 +1,3 @@
-# import os
-# import csv
-# from PIL import Image
-
-# # 경로 설정
-# base_path = "/node_data/urp24s_jsjeon/3Difftection_Reproduce/new/raw/Training"
-# video_id = "40777060"  # 처리할 특정 video_id
-# src_folder = os.path.join(base_path, video_id, "extract")
-# dst_folder = os.path.join(base_path, video_id, "extract_rotate_resize")
-
-# # CSV 파일 경로
-# csv_path = "/node_data/urp24s_jsjeon/3Difftection_Reproduce/ControlNet2/raw/metadata.csv"
-
-# # CSV에서 sky_direction 읽기
-# sky_direction = None
-# with open(csv_path, 'r') as csvfile:
-#     reader = csv.DictReader(csvfile)
-#     for row in reader:
-#         if row['video_id'] == video_id:
-#             sky_direction = row['sky_direction']
-#             break
-
-# if sky_direction is None:
-#     print(f"Sky direction for video {video_id} not found. Skipping processing.")
-#     exit()
-
-# # 회전 각도 설정 (반시계 방향 회전)
-# rotation_degrees = {
-#     "Up": 0,
-#     "Right": 90,
-#     "Down": 180,
-#     "Left": 270
-# }
-
-# # 대상 폴더가 없으면 생성
-# if not os.path.exists(dst_folder):
-#     os.makedirs(dst_folder)
-
-# # 이미지 처리 함수
-# def process_image(src_path, dst_path, rotation):
-#     with Image.open(src_path) as img:
-#         rotated_img = img.rotate(rotation, expand=True)
-#         resized_img = rotated_img.resize((256, 256), Image.LANCZOS)
-#         resized_img.save(dst_path)
-
-# # 파일 처리
-# rotation = rotation_degrees.get(sky_direction, 0)
-# for filename in os.listdir(src_folder):
-#     if filename.endswith('.png'):
-#         src_path = os.path.join(src_folder, filename)
-#         dst_path = os.path.join(dst_folder, filename)
-        
-#         process_image(src_path, dst_path, rotation)
-#         print(f"Processed: {filename}")
-
-# print(f"Processing complete. Sky direction: {sky_direction}, Rotation: {rotation} degrees, Resized to 256x256")
 import os
 import csv
 from PIL import Image
@@ -61,10 +5,10 @@ from tqdm import tqdm
 import time
 
 # 경로 설정
-base_path = "/node_data/urp24s_jsjeon/3Difftection_Reproduce/new/raw/Training"
+base_path = "{사진 폴더 경로 ex. Traing/}"
 
 # CSV 파일 경로
-csv_path = "/node_data/urp24s_jsjeon/3Difftection_Reproduce/ControlNet2/raw/metadata.csv"
+csv_path = "{사진 sky_direction 담겨있는 csv 경로 ex. raw/metadata.csv}"
 
 # CSV에서 sky_direction 읽기
 sky_directions = {}
@@ -76,9 +20,9 @@ with open(csv_path, 'r') as csvfile:
 # 회전 각도 설정 (반시계 방향 회전)
 rotation_degrees = {
     "Up": 0,
-    "Right": 90,
-    "Down": 180,
-    "Left": 270
+    "Right": 0,
+    "Down": 0,
+    "Left": 0
 }
 
 # 이미지 처리 함수
@@ -97,7 +41,7 @@ def process_image(src_path, dst_path, rotation):
 def process_folder(video_id):
     video_path = os.path.join(base_path, video_id)
     src_folder = os.path.join(video_path, "extract")
-    dst_folder = os.path.join(video_path, "extract_rotate_resize")
+    dst_folder = os.path.join(video_path, "extract_resize")
 
     # extract 폴더가 없으면 건너뛰기
     if not os.path.exists(src_folder):

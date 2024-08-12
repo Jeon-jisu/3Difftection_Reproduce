@@ -1,3 +1,8 @@
+"""
+실행시키는 방법
+python tool_add_control_custom_epiagr.py ./models/v1-5-pruned.ckpt ./models/control_new.ckpt
+
+"""
 import sys
 import os
 import torch

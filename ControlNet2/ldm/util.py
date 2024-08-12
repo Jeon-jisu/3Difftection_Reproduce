@@ -70,8 +70,6 @@ def count_params(model, verbose=False):
 
 
 def instantiate_from_config(config):
-    print("target",config["target"])
-    print("params: ",config["params"])
     if not "target" in config:
         if config == '__is_first_stage__':
             return None
@@ -82,7 +80,6 @@ def instantiate_from_config(config):
 
 
 def get_obj_from_str(string, reload=False):
-    print("string:",string)
     module, cls = string.rsplit(".", 1)
     if reload:
         module_imp = importlib.import_module(module)
@@ -198,3 +195,5 @@ class AdamWwithEMAandWings(optim.Optimizer):
                 ema_param.mul_(cur_ema_decay).add_(param.float(), alpha=1 - cur_ema_decay)
 
         return loss
+    
+    

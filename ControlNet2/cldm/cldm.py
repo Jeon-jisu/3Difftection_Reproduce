@@ -3,7 +3,8 @@ import torch
 import torch as th
 import torch.nn as nn
 import torch.nn.functional as F
-
+import numpy as np
+import cv2
 from ldm.modules.diffusionmodules.util import (
     conv_nd,
     linear,
@@ -22,9 +23,6 @@ from ldm.models.diffusion.ddim import DDIMSampler
 class EpipolarWarpOperator(nn.Module):
     def __init__(self):
         super(EpipolarWarpOperator, self).__init__()
-        self.conv1 = None
-        # self.conv1 = nn.Conv2d(in_channels=320, out_channels=320, kernel_size=3, stride=1, padding=1)
-        self.relu = nn.ReLU()
         
     def forward(self, x, source_intrinsics, target_intrinsics, source_pose, target_pose):
         dtype = x.dtype
@@ -33,11 +31,9 @@ class EpipolarWarpOperator(nn.Module):
         source_pose = source_pose.to(dtype)
         target_pose = target_pose.to(dtype)
         batch_size, channels, height, width = x.size()
-        if self.conv1 is None or self.conv1.in_channels != channels:
-            self.conv1 = nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=3, stride=1, padding=1).to(x.device)
         
         # Compute fundamental matrix for each sample in the batch
-        F_batch = self.compute_fundamental_matrix_batch(source_intrinsics, target_intrinsics, source_pose, target_pose)
+        F_batch = self.compute_fundamental_matrix_batch(source_intrinsics, target_intrinsics, source_pose, target_pose, height, width)
         
         # Generate pixel coordinates
         pixel_coords = self.generate_pixel_coords(batch_size, height, width, x.device)
@@ -48,33 +44,66 @@ class EpipolarWarpOperator(nn.Module):
         # Sample features along epipolar lines
         sampled_features = self.sample_along_epipolar_lines(x, epipolar_lines, height, width)
         
-        # Apply convolution and activation
-        output = self.conv1(sampled_features)
-        output = self.relu(output)
+        output = sampled_features
         
         return output
-
-    def compute_fundamental_matrix_batch(self, source_intrinsics, target_intrinsics, source_pose, target_pose):
-        # print("source_intrinsics",source_intrinsics)
+    def compute_fundamental_matrix_batch(self, source_intrinsics, target_intrinsics, source_pose, target_pose, height, width):
         batch_size = source_intrinsics.shape[0]
+        feature_size_width = width
+        feature_size_height = height
+        scale_x = feature_size_width / 256
+        scale_y = feature_size_height / 256
         F_batch = []
         for i in range(batch_size):
-            K_source = source_intrinsics[i]
-            K_target = target_intrinsics[i]
-            R_source = self.rotation_vector_to_matrix(source_pose[i, :3])
-            t_source = source_pose[i, 3:].unsqueeze(1)
-            R_target = self.rotation_vector_to_matrix(target_pose[i, :3])
-            t_target = target_pose[i, 3:].unsqueeze(1)
+            K1 = source_intrinsics[i].cpu().numpy()
+            K2 = target_intrinsics[i].cpu().numpy()
+            # 내부 파라미터 조정
+            K1_adjusted = K1.copy()
+            K2_adjusted = K2.copy()
             
-            R_relative = torch.mm(R_source.t(), R_target)
-            t_relative = t_source - torch.mm(R_relative, t_target)
+            K1_adjusted[0, 0] *= scale_x #F_x
+            K1_adjusted[1, 1] *= scale_y #F_y
+            K1_adjusted[0, 2] *= scale_x #C_x
+            K1_adjusted[1, 2] *= scale_y #C_y
             
-            E = torch.mm(self.skew_symmetric(t_relative.squeeze()), R_relative)
-            F = torch.mm(torch.mm(torch.inverse(K_target).t(), E), torch.inverse(K_source))
-            F_batch.append(F)
+            K2_adjusted[0, 0] *= scale_x
+            K2_adjusted[1, 1] *= scale_y
+            K2_adjusted[0, 2] *= scale_x
+            K2_adjusted[1, 2] *= scale_y
+            # 회전 벡터를 회전 행렬로 변환
+            R1, _ = cv2.Rodrigues(source_pose[i, :3].cpu().numpy())
+            R2, _ = cv2.Rodrigues(target_pose[i, :3].cpu().numpy())
+            
+            t1 = source_pose[i, 3:].cpu().numpy()
+            t2 = target_pose[i, 3:].cpu().numpy()
+            
+            # 상대적 회전과 평행 이동 계산
+            R = R2 @ R1.T
+            t = t2 - R @ t1
+            
+            # Essential Matrix 계산
+            t_x = np.array([
+                [0, -t[2], t[1]],
+                [t[2], 0, -t[0]],
+                [-t[1], t[0], 0]
+            ])
+            E = t_x @ R
+            
+            # Fundamental Matrix 계산
+            F = np.linalg.inv(K2_adjusted).T @ E @ np.linalg.inv(K1_adjusted)
+            
+            # SVD를 사용한 Fundamental Matrix 정규화
+            U, S, Vt = np.linalg.svd(F)
+            S[-1] = 0  # 마지막 특이값을 0으로 설정
+            F = U @ np.diag(S) @ Vt
+            
+            # 정규화
+            F = F / np.linalg.norm(F)
+            
+            F_batch.append(torch.from_numpy(F.astype(np.float32)).to(source_intrinsics.device))
+  
         
         return torch.stack(F_batch)
-
     def generate_pixel_coords(self, batch_size, height, width, device):
         x = torch.arange(width, device=device).float()
         y = torch.arange(height, device=device).float()
@@ -89,9 +118,9 @@ class EpipolarWarpOperator(nn.Module):
         sampled_features = []
         y = torch.arange(height, device=x.device, dtype=x.dtype).view(1, 1, -1, 1)
         y = y.expand(batch_size, 1, -1, 1)  # [batch_size, 1, height, 1]
-        for i in range(width):
-            for j in range(height):
-                l = epipolar_lines[:, :, i*height + j].view(batch_size, 3, 1)
+        for j in range(height):
+            for i in range(width):
+                l = epipolar_lines[:, :, j*width + i].view(batch_size, 3, 1)
                 a, b, c = l[:, 0], l[:, 1], l[:, 2]
 
                 # 에피폴라 선과 이미지 경계의 교차점 계산
@@ -101,7 +130,7 @@ class EpipolarWarpOperator(nn.Module):
                 y2 = torch.clamp(-(a*(width-1) + c) / (b + 1e-10), 0, height - 1)
 
                 # 에피폴라 선을 따라 일정 간격으로 샘플링 포인트 생성
-                num_samples = 20  # 샘플링 포인트 수
+                num_samples = 32  # 샘플링 포인트 수
                 t = torch.linspace(0, 1, num_samples, device=x.device).view(1, -1).expand(batch_size, -1)
                 sample_x = x1.view(-1, 1) * (1 - t) + x2.view(-1, 1) * t
                 sample_y = y1.view(-1, 1) * (1 - t) + y2.view(-1, 1) * t
@@ -119,7 +148,6 @@ class EpipolarWarpOperator(nn.Module):
                 averaged_feature = sampled.mean(dim=3)  # [batch_size, channels, 1]
                 sampled_features.append(averaged_feature.squeeze(2))
 
-        # print("batch_size",batch_size,"channels",channels,"height",height,"width",width)
         return torch.stack(sampled_features, dim=2).view(batch_size, channels, height, width)
 
     @staticmethod
@@ -170,17 +198,10 @@ class ControlledUnetModel(UNetModel):
             if only_mid_control or control is None:
                 h = torch.cat([h, hs.pop()], dim=1)
             else:
-                # print(f"h shape: {h.shape}")
                 hs_popped = hs.pop()
-                # print(f"hs.pop() shape: {hs_popped.shape}")
                 control_popped = control.pop()
-                # print(f"control.pop() shape: {control_popped.shape}")
                 h = torch.cat([h, hs_popped + control_popped], dim=1)
             h = module(h, emb, context)
-            # print(f"After concatenation, h shape: {h.shape}")
-            # Apply epipolar warping only to the last two decoder blocks
-            
-            # print(f"After epipolar_warp, h shape: {h.shape}")
         h = h.type(x.dtype)
         return self.out(h)
 
@@ -431,16 +452,17 @@ class ControlNet(nn.Module):
         outs = []
 
         h = x.type(self.dtype)
-        for module, zero_conv in zip(self.input_blocks, self.zero_convs):
+        for i,(module, zero_conv) in enumerate(zip(self.input_blocks, self.zero_convs)):
             if guided_hint is not None:
                 h = module(h, emb, context)
                 h += guided_hint
                 guided_hint = None # 첫번째 encoder block에서만 통합하여 들어간다. 
             else:
                 h = module(h, emb, context)
-            # print("epipolar로 잘 전달되는지 확인",target_pose[-1])
-            h = self.epipolar_warp(h, source_intrinsic, target_intrinsic, source_pose, target_pose)
-            outs.append(zero_conv(h, emb, context))
+            if i in [2,5]:
+                outs.append(zero_conv(self.epipolar_warp(h, source_intrinsic, target_intrinsic, source_pose, target_pose), emb, context))
+            else:
+                outs.append(zero_conv(h, emb, context))# 연속해서 적용해줄거는 다시 원래 h로 만들기
 
         h = self.middle_block(h, emb, context)
         outs.append(self.middle_block_out(h, emb, context))
@@ -460,23 +482,17 @@ class ControlLDM(LatentDiffusion):
     @torch.no_grad()
     def get_input(self, batch, k, bs=None, *args, **kwargs):
         x, c = super().get_input(batch, self.first_stage_key, *args, **kwargs)
+        # c는 text embedding vector
         control = batch[self.control_key]
         if bs is not None:
             control = control[:bs]
-            
-        # print("control:",control)
         # source_pose, target_pose, intrinsic_params를 batch에서 가져옵니다.
         source_pose = batch.get('source_camera_pose').to(self.device)
         target_pose = batch.get('target_camera_pose').to(self.device)
         source_intrinsic = batch.get('source_camera_intrinsic').to(self.device)
         target_intrinsic = batch.get('target_camera_intrinsic').to(self.device)
-        # print("Debug - get_input - source_pose:", source_pose)
-        # print("Debug - get_input - target_pose:", target_pose)
-        # print("Debug - get_input - source_intrinsic:", source_intrinsic)
-        # print("Debug - get_input - target_intrinsic:", target_intrinsic)
         control = control.to(self.device)
-        control = einops.rearrange(control, 'b h w c -> b c h w')
-        control = control.to(memory_format=torch.contiguous_format).float()
+        control = einops.rearrange(control, 'b h w c -> b c h w') # batch_size , 256, 256, 3 -> batch_size , 3, 256, 256
         return x, dict(c_crossattn=[c], c_concat=[control],source_pose=source_pose, target_pose=target_pose, 
                        source_intrinsic=source_intrinsic, target_intrinsic = target_intrinsic)
 
@@ -494,10 +510,6 @@ class ControlLDM(LatentDiffusion):
             target_pose = cond.get('target_pose')
             source_intrinsic = cond.get('source_intrinsic')
             target_intrinsic = cond.get('target_intrinsic')
-            # print("Debug - source_pose:", source_pose)
-            # print("Debug - target_pose:", target_pose)
-            # print("Debug - source_intrinsic:", source_intrinsic)
-            # print("Debug - target_intrinsic:", target_intrinsic)
             control = self.control_model(x=x_noisy, hint=torch.cat(cond['c_concat'], 1), timesteps=t, context=cond_txt,source_pose=source_pose, target_pose=target_pose, 
                                   source_intrinsic=source_intrinsic, target_intrinsic = target_intrinsic)
             control = [c * scale for c, scale in zip(control, self.control_scales)]
@@ -521,7 +533,6 @@ class ControlLDM(LatentDiffusion):
         log = dict()
         z, c_dict = self.get_input(batch, self.first_stage_key, bs=N)
         c_cat, c = c_dict["c_concat"][0][:N], c_dict["c_crossattn"][0][:N]
-        # print("****",c_dict["source_pose"])
         source_pose = c_dict["source_pose"]
         target_pose = c_dict["target_pose"]
         source_intrinsic = c_dict["source_intrinsic"]
@@ -588,12 +599,6 @@ class ControlLDM(LatentDiffusion):
 
     @torch.no_grad()
     def sample_log(self, cond, batch_size, ddim, ddim_steps, **kwargs):
-        
-        # print("Debug - sample_log - cond keys:", cond.keys())
-        # print("Debug - sample_log - source_pose:", cond.get('source_pose'))
-        # print("Debug - sample_log - target_pose:", cond.get('target_pose'))
-        # print("Debug - sample_log - source_intrinsic:", cond.get('source_intrinsic'))
-        # print("Debug - sample_log - target_intrinsic:", cond.get('target_intrinsic'))
         ddim_sampler = DDIMSampler(self)
         b, c, h, w = cond["c_concat"][0].shape
         shape = (self.channels, h // 8, w // 8)

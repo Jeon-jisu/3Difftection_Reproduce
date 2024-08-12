@@ -1,3 +1,8 @@
+"""
+실행시키는 방법
+python tool_add_control_custom_epiagr.py ./models/v1-5-pruned.ckpt ./models/control_new.ckpt
+
+"""
 import sys
 import os
 import torch
@@ -10,7 +15,7 @@ import yaml
 
 import numpy as np
 from scipy.spatial.transform import Rotation as R
-from cldm.cldm import ControlLDM, ModifiedControlNet, EpipolarWarpOperator
+from cldm.cldm import ControlLDM, EpipolarWarpOperator
 
 input_path = sys.argv[1]
 output_path = sys.argv[2]

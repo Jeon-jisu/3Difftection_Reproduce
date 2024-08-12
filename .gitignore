@@ -9,16 +9,19 @@ ControlNet2/checkpoints
 ControlNet2/wandb
 ControlNet2/image_log
 ControlNet2/models
-oldver/configs testControlNet2/epipolartest
+oldver/configs 
+testControlNet2/epipolartest
 .DS_Store
 Training/
 testraw
 annotation.json
 testControlNet2/
 testControlNet/
+testControlNet3/
 rawtest/
 oldver/
 datasets/
+testControlNet_hwha/
 *.png
 *.pincam
 *.csv
@@ -180,3 +183,7 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+ControlNet2/before_resize_raw/
+ControlNet2/config/
+unused/
+ControlNet2/raworigin_rotation필터링한후개수로필터링하기전/annotations_new.json

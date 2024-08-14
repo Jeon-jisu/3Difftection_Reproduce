@@ -9,6 +9,7 @@ ControlNet2/checkpoints
 ControlNet2/wandb
 ControlNet2/image_log
 ControlNet2/models
+ControlNet2/before_resize_raw
 oldver/configs 
 testControlNet2/epipolartest
 .DS_Store
@@ -187,3 +188,4 @@ ControlNet2/before_resize_raw/
 ControlNet2/config/
 unused/
 ControlNet2/raworigin_rotation필터링한후개수로필터링하기전/annotations_new.json
+ControlNet2/data_object_image_2.zip

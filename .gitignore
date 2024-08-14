@@ -191,6 +191,7 @@ ControlNet2/config/
 unused/
 ControlNet2/raworigin_rotation필터링한후개수로필터링하기전/annotations_new.json
 ControlNet2/data_object_image_2.zip
+<<<<<<< HEAD
 omni3d/output/omni3d_example_run/category_meta.json
 omni3d/output/omni3d_example_run/config.yaml
 omni3d/output/omni3d_example_run/events.out.tfevents.1723624588.gpu10.64991.0
@@ -200,3 +201,6 @@ omni3d/output/omni3d_example_run/last_checkpoint
 omni3d/output/omni3d_example_run/log.txt
 omni3d/output/omni3d_example_run/metrics.json
 omni3d/output/omni3d_example_run/model_recent.pth
+=======
+omni3d/output_first_5_items.txt
+>>>>>>> 9686a570d (Remove large file and add to .gitignore)

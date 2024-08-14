@@ -10,6 +10,8 @@ ControlNet2/wandb
 ControlNet2/image_log
 ControlNet2/models
 ControlNet2/before_resize_raw
+omni3d/datasets/
+omni3d/output/
 oldver/configs 
 testControlNet2/epipolartest
 .DS_Store

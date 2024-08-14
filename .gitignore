@@ -9,6 +9,7 @@ ControlNet2/checkpoints
 ControlNet2/wandb
 ControlNet2/image_log
 ControlNet2/models
+ControlNet2/before_resize_raw
 oldver/configs 
 testControlNet2/epipolartest
 .DS_Store

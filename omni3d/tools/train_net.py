@@ -1,4 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import wandb
 import logging
 import os
 import sys
@@ -26,7 +27,7 @@ logger = logging.getLogger("cubercnn")
 
 sys.dont_write_bytecode = True
 sys.path.append(os.getcwd())
-np.set_printoptions(suppress=True)
+np.set_printoptions(suppress=False)
 
 from cubercnn.solver import build_optimizer, freeze_bn, PeriodicCheckpointerOnlyOne
 from cubercnn.config import get_cfg_defaults
@@ -105,6 +106,12 @@ def do_test(cfg, model, iteration='final', storage=None):
                 MetadataCatalog.get('omni3d_model').thing_classes, iteration
             )
             logger.info(log_str)
+            wandb.log({
+                "test/mean_AP": eval_helper.results['mean_AP'],
+                "test/mean_AP_50": eval_helper.results['mean_AP_50'],
+                "test/mean_AP_25": eval_helper.results['mean_AP_25'],
+                # 다른 관련 메트릭들도 추가할 수 있습니다.
+            })
 
     if comm.is_main_process():
         
@@ -181,7 +188,7 @@ def do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=F
             # forward
             loss_dict = model(data)
             losses = sum(loss_dict.values())
-
+            # ControlLDM에 K 값 전달
             # reduce
             loss_dict_reduced = {k: v.item() for k, v in allreduce_dict(loss_dict).items()}
             losses_reduced = sum(loss for loss in loss_dict_reduced.values())
@@ -212,6 +219,12 @@ def do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=F
             if comm.is_main_process():
                 # send loss scalars to tensorboard.
                 storage.put_scalars(total_loss=losses_reduced, **loss_dict_reduced)
+                wandb.log({
+                    "iter": iteration,
+                    "total_loss": losses_reduced,
+                    "lr": optimizer.param_groups[0]["lr"],
+                    **loss_dict_reduced
+                })
         
             # backward and step
             optimizer.zero_grad()
@@ -332,7 +345,11 @@ def setup(args):
     cfg.merge_from_list(args.opts)
     cfg.freeze()
     default_setup(cfg, args)
-
+    if comm.is_main_process():
+        wandb.init(
+            project=cfg.WANDB.PROJECT, 
+            name=cfg.WANDB.NAME,
+            config=cfg)
     setup_logger(output=cfg.OUTPUT_DIR, distributed_rank=comm.get_rank(), name="cubercnn")
     
     filter_settings = data.get_filter_settings_from_cfg(cfg)
@@ -465,8 +482,12 @@ def main(args):
     if remaining_attempts == 0:
         # Exit if the model could not finish without diverging. 
         raise ValueError('Training failed')
-        
-    return do_test(cfg, model)
+    
+    test_results = do_test(cfg, model)
+
+    if comm.is_main_process():
+        wandb.finish()
+    return test_results
 
 def allreduce_dict(input_dict, average=True):
     """

@@ -16,7 +16,7 @@ from detectron2.modeling.meta_arch import (
     META_ARCH_REGISTRY, GeneralizedRCNN
 )
 from cubercnn.modeling.roi_heads import build_roi_heads
-
+from controlnet.cldm.cldm import ControlLDM, SemanticControlNet, ControlNet
 from detectron2.data import MetadataCatalog
 from pytorch3d.transforms import rotation_6d_to_matrix
 from cubercnn.modeling.roi_heads import build_roi_heads
@@ -265,7 +265,6 @@ def build_backbone(cfg, input_shape=None, priors=None):
     """
     if input_shape is None:
         input_shape = ShapeSpec(channels=len(cfg.MODEL.PIXEL_MEAN))
-
     backbone_name = cfg.MODEL.BACKBONE.NAME
     backbone = BACKBONE_REGISTRY.get(backbone_name)(cfg, input_shape, priors)
     assert isinstance(backbone, Backbone)

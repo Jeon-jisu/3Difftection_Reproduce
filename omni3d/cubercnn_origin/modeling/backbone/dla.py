@@ -472,13 +472,13 @@ class DLABackbone(Backbone):
         level4 = self.level4(level3)
         level5 = self.level5(level4)
         level6 = F.max_pool2d(level5, kernel_size=1, stride=2, padding=0)
-
+        
         outputs['p2'] = level2
         outputs['p3'] = level3
         outputs['p4'] = level4
         outputs['p5'] = level5
         outputs['p6'] = level6
-
+        print("base_layer.shape",base_layer.shape,"level0.shape",level0.shape,"level1.shape",level1.shape,"level2.shape",level2.shape,"level3.shape",level3.shape,"level4.shape",level4.shape,"level5.shape",level5.shape,"level6.shape",level6.shape)
         return outputs
 
 @BACKBONE_REGISTRY.register()
@@ -491,8 +491,9 @@ def build_dla_from_vision_fpn_backbone(cfg, input_shape: ShapeSpec, priors=None)
         backbone (Backbone): backbone module, must be a subclass of :class:`Backbone`.
     """
 
-    imagenet_pretrain = cfg.MODEL.WEIGHTS_PRETRAIN + cfg.MODEL.WEIGHTS == ''
-
+    imagenet_pretrain = cfg.MODEL.WEIGHTS_PRETRAIN + cfg.MODEL.WEIGHTS == '' # 둘중 하나라도 값이 있는 경우 False가 된다. 
+    # input_shape 값은 ShapeSpec(channels=3, height=None, width=None, stride=None), 
+    # imagenet_pretrain값은 정의되어있지 않아서 True임. 
     bottom_up = DLABackbone(cfg, input_shape, pretrained=imagenet_pretrain)
     in_features = cfg.MODEL.FPN.IN_FEATURES
     out_channels = cfg.MODEL.FPN.OUT_CHANNELS

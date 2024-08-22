@@ -1,7 +1,16 @@
 # Byte-compiled / optimized / DLL files
+*.txt
 __pycache__/
 *.py[cod]
 *$py.class
+ControlNet2/raw
+ControlNet2/test_imgs
+ControlNet2/testraw
+ControlNet2/checkpoints 
+ControlNet2/wandb
+ControlNet2/image_log
+ControlNet2/models
+ControlNet2/before_resize_raw
 omni3d/controlnet/raw
 omni3d/controlnet/test_imgs
 omni3d/controlnet/testraw
@@ -12,7 +21,7 @@ omni3d/controlnet/models
 omni3d/controlnet/before_resize_raw
 omni3d/datasets/
 omni3d/output/
-
+omni3d/wandb
 oldver/configs 
 testControlNet2/epipolartest
 .DS_Store

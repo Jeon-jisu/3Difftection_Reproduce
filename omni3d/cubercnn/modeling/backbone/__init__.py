@@ -3,3 +3,5 @@ from .mnasnet import *
 from .resnet import * 
 from .shufflenet import * 
 from .dla import * 
+from .controlldm import *
+from .controlunet import *

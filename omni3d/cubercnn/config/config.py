@@ -36,6 +36,11 @@ def get_cfg_defaults(cfg):
     # Threshold used for matching and filtering boxes
     # inside of ignore regions, within the RPN and ROIHeads
     cfg.MODEL.RPN.IGNORE_THRESHOLD = 0.5
+    
+    # wandb 설정 추가
+    cfg.WANDB = CN()
+    cfg.WANDB.PROJECT = "cube-rcnn"
+    cfg.WANDB.NAME = 'default'
 
     # Configuration for cube head
     cfg.MODEL.ROI_CUBE_HEAD = CN()
@@ -119,6 +124,55 @@ def get_cfg_defaults(cfg):
     cfg.MODEL.ROI_CUBE_HEAD.LOSS_W_Z = 1.0
     cfg.MODEL.ROI_CUBE_HEAD.LOSS_W_DIMS = 1.0
     cfg.MODEL.ROI_CUBE_HEAD.LOSS_W_POSE = 1.0
+
+    # Controlldm관련 Config 추가
+    cfg.MODEL.CONTROLLDM = CN()
+    cfg.MODEL.CONTROLLDM.CONTROL_STAGE = CN()
+    cfg.MODEL.CONTROLLDM.CONTROL_STAGE.target = "controlnet.cldm.cldm.ControlNet"
+    cfg.MODEL.CONTROLLDM.CONTROL_STAGE.NAME = "controlnet"
+    cfg.MODEL.CONTROLLDM.SEMANTIC_CONTROL_STAGE = CN()
+    cfg.MODEL.CONTROLLDM.SEMANTIC_CONTROL_STAGE.target = "controlnet.cldm.cldm.SemanticControlNet"
+    cfg.MODEL.CONTROLLDM.SEMANTIC_CONTROL_STAGE.NAME = "semantic_controlnet"
+    cfg.MODEL.CONTROLLDM.CONFIG_PATH = "./controlnet/models/cldm_v15v3.yaml"
+    cfg.MODEL.CONTROLLDM.CONTROL_KEY = "control"
+    cfg.MODEL.CONTROLLDM.ONLY_MID_CONTROL = False
+    cfg.MODEL.CONTROLLDM.ARGS = []
+    cfg.MODEL.CONTROLLDM.KWARGS = []
+    cfg.MODEL.CONTROLLDM.FIRST_STAGE_CONFIG = CN()
+    cfg.MODEL.CONTROLLDM.FIRST_STAGE_CONFIG.target = "ldm.models.autoencoder.AutoencoderKL"
+    cfg.MODEL.CONTROLLDM.FIRST_STAGE_CONFIG.params = CN()
+    cfg.MODEL.CONTROLLDM.FIRST_STAGE_CONFIG.params.embed_dim = 4
+    cfg.MODEL.CONTROLLDM.FIRST_STAGE_CONFIG.params.monitor = "val/rec_loss"
+    cfg.MODEL.CONTROLLDM.FIRST_STAGE_CONFIG.params.ddconfig = CN()
+    cfg.MODEL.CONTROLLDM.FIRST_STAGE_CONFIG.params.ddconfig.double_z = True
+    cfg.MODEL.CONTROLLDM.FIRST_STAGE_CONFIG.params.ddconfig.z_channels = 4
+    cfg.MODEL.CONTROLLDM.FIRST_STAGE_CONFIG.params.ddconfig.resolution = 256
+    cfg.MODEL.CONTROLLDM.FIRST_STAGE_CONFIG.params.ddconfig.in_channels = 3
+    cfg.MODEL.CONTROLLDM.FIRST_STAGE_CONFIG.params.ddconfig.out_ch = 3
+    cfg.MODEL.CONTROLLDM.FIRST_STAGE_CONFIG.params.ddconfig.ch = 128
+    cfg.MODEL.CONTROLLDM.FIRST_STAGE_CONFIG.params.ddconfig.ch_mult = [1, 2, 4, 4]
+    cfg.MODEL.CONTROLLDM.FIRST_STAGE_CONFIG.params.ddconfig.num_res_blocks = 2
+    cfg.MODEL.CONTROLLDM.FIRST_STAGE_CONFIG.params.ddconfig.attn_resolutions = []
+    cfg.MODEL.CONTROLLDM.FIRST_STAGE_CONFIG.params.ddconfig.dropout = 0.0
+
+    cfg.MODEL.CONTROLLDM.COND_STAGE_CONFIG = CN()
+    cfg.MODEL.CONTROLLDM.COND_STAGE_CONFIG.target = "ldm.modules.encoders.modules.FrozenCLIPEmbedder"
+    cfg.MODEL.CONTROLLDM.COND_STAGE_CONFIG.params = CN()
+
+    # ControlnetUnet관련 Config 추가
+    # cfg.MODEL.CONTROLLEDUNET = CN()
+    # cfg.MODEL.CONTROLLEDUNET.CONFIG_PATH = "./controlnet/models/cldm_v15v3.yaml"
+    # cfg.MODEL.CONTROLLEDUNET.PRETRAINED_PATH = "./controlnet/models/new_semantic.ckpt"
+    # cfg.MODEL.CONTROLLEDUNET.SD_LOCKED = True
+    # cfg.MODEL.CONTROLLEDUNET.VAE_LOCKED = True
+    # cfg.MODEL.CONTROLLEDUNET.CONTROL_STAGE = CN()
+    # cfg.MODEL.CONTROLLEDUNET.CONTROL_STAGE.NAME = "controlnet"
+    # cfg.MODEL.CONTROLLEDUNET.SEMANTIC_CONTROL_STAGE = CN()
+    # cfg.MODEL.CONTROLLEDUNET.SEMANTIC_CONTROL_STAGE.NAME = "semantic_controlnet"
+    # cfg.MODEL.CONTROLLEDUNET.CONTROL_KEY = "hint"
+    # cfg.MODEL.CONTROLLEDUNET.ONLY_MID_CONTROL = False
+    # cfg.MODEL.CONTROLLEDUNET.ARGS = []
+    # cfg.MODEL.CONTROLLEDUNET.KWARGS = []
 
     cfg.MODEL.DLA = CN()
 

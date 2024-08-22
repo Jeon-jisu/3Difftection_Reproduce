@@ -7,11 +7,9 @@ SOLVER:
   WEIGHT_DECAY: 0.0001
   LR_SCHEDULER_NAME: "WarmupMultiStepLR"
 INPUT:
-  MIN_SIZE_TRAIN: (256,)
+  MIN_SIZE_TRAIN: (256, 272, 288, 304, 320, 336, 352, 368, 384, 400, 416, 432, 448, 464, 480, 496, 512, 528, 544, 560, 576, 592, 608, 624, 640,)
   MIN_SIZE_TEST: 512
-  # MIN_SIZE_TRAIN: (256, 272, 288, 304, 320, 336, 352, 368, 384, 400, 416, 432, 448, 464, 480, 496, 512, 528, 544, 560, 576, 592, 608, 624, 640,)
-  MAX_SIZE_TRAIN: 256
-  # MAX_SIZE_TRAIN: 4096
+  MAX_SIZE_TRAIN: 4096
   MAX_SIZE_TEST: 4096
 TEST:
   VISIBILITY_THRES: 0.33333333
@@ -26,9 +24,6 @@ DATASETS:
   TRUNCATION_THRES: 0.75
   VISIBILITY_THRES: 0.25
   TRUNC_2D_BOXES: True
-WANDB:
-  PROJECT: "3Difftection-detection"
-  NAME: "debug"
 VIS_PERIOD: 640
 DATALOADER:
   SAMPLER_TRAIN: "RepeatFactorTrainingSampler"
@@ -43,8 +38,8 @@ MODEL:
   BACKBONE:
     FREEZE_AT: 0
     # NAME: "build_controlled_unet_fpn_backbone"
-    NAME: "build_controlldm_fpn_backbone"
-    # NAME: 'build_dla_from_vision_fpn_backbone'
+    # NAME: "build_controlldm_fpn_backbone"
+    NAME: 'build_dla_from_vision_fpn_backbone'
   # CONTROLLEDUNET:
   #   CONFIG_PATH: './controlnet/models/cldm_v15v3.yaml'
   #   PRETRAINED_PATH: './controlnet/models/new_semantic.ckpt'
@@ -57,29 +52,25 @@ MODEL:
   #   ONLY_MID_CONTROL: False
   #   ARGS: []
   #   KWARGS: []
-  CONTROLLDM:
-    CONTROL_STAGE:
-      target: "controlnet.cldm.cldm.ControlNet"
-      NAME: "controlnet"
-    SEMANTIC_CONTROL_STAGE:
-      target: "controlnet.cldm.cldm.SemanticControlNet"
-      NAME: "semantic_controlnet"
-    CONTROL_KEY: "control"
-    ONLY_MID_CONTROL: False
-    ARGS: []
-    KWARGS: []
+  # CONTROLLDM:
+  #   CONTROL_STAGE:
+  #     NAME: "controlnet"
+  #   SEMANTIC_CONTROL_STAGE:
+  #     NAME: "semantic_controlnet"
+  #   CONTROL_KEY: "control"
+  #   ONLY_MID_CONTROL: False
+  #   ARGS: []
+  #   KWARGS: []
   DLA:
     TYPE: 'dla34'
   FPN:
     IN_FEATURES: ['p2', 'p3', 'p4', 'p5', 'p6']
-    # IN_FEATURES: ["p3", "p6", "p9", "p12"]
   ANCHOR_GENERATOR:
     SIZES: [[32], [64], [128], [256], [512]]  # One size for each in feature map
     ASPECT_RATIOS: [[0.5, 1.0, 2.0]]  # Three aspect ratios (same for all in feature maps)
   RPN:
     HEAD_NAME: "StandardRPNHead"
     IN_FEATURES: ['p2', 'p3', 'p4', 'p5', 'p6']
-    # IN_FEATURES: ["p3", "p6", "p9", "p12"]
     PRE_NMS_TOPK_TRAIN: 2000  # Per FPN level
     PRE_NMS_TOPK_TEST: 1000  # Per FPN level
     POST_NMS_TOPK_TRAIN: 1000
@@ -93,7 +84,6 @@ MODEL:
   ROI_HEADS:
     NAME: "ROIHeads3D"
     IN_FEATURES: ["p2", "p3", "p4", "p5", 'p6']
-    # IN_FEATURES: ["p3", "p6", "p9", "p12"]
     BATCH_SIZE_PER_IMAGE: 512
     SCORE_THRESH_TEST: 0.01
     NUM_CLASSES: 43

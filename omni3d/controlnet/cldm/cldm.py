@@ -745,8 +745,10 @@ class SemanticControlNet(nn.Module):
 
 class ControlLDM(LatentDiffusion):
 
-    def __init__(self, control_stage_config, semantic_control_stage_config, control_key, only_mid_control, *args, **kwargs):
+    def __init__(self, use_geo, use_sem, control_stage_config, semantic_control_stage_config, control_key, only_mid_control,*args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.use_geo = use_geo
+        self.use_sem = use_sem
         self.control_model = instantiate_from_config(control_stage_config)
         self.semantic_control_model = instantiate_from_config(semantic_control_stage_config)
         self.control_key = control_key
@@ -782,7 +784,7 @@ class ControlLDM(LatentDiffusion):
         return x, dict(c_crossattn=[c], c_concat=[control],source_pose=source_pose, target_pose=target_pose, 
                        source_intrinsic=source_intrinsic, target_intrinsic = target_intrinsic)
 
-    def apply_model(self, x_noisy, t, cond, *args, **kwargs):
+    def apply_model(self, x_noisy, t, cond, return_intermediate=False, *args, **kwargs):
         assert isinstance(cond, dict)
         diffusion_model = self.model.diffusion_model
 
@@ -791,25 +793,36 @@ class ControlLDM(LatentDiffusion):
         if cond['c_concat'] is None:
             eps = diffusion_model(x=x_noisy, timesteps=t, context=cond_txt, control=None, only_mid_control=self.only_mid_control)
         else:
-            # 여기에서 source_pose, target_pose, intrinsic_params를 가져옵니다. None
             source_pose = cond.get('source_pose')
             target_pose = cond.get('target_pose')
             source_intrinsic = cond.get('source_intrinsic')
             target_intrinsic = cond.get('target_intrinsic')
-            # Get output from Geometric ControlNet
-            with torch.no_grad():
-                geometric_control = self.control_model(x=x_noisy, hint=torch.cat(cond['c_concat'], 1), timesteps=t, context=cond_txt,source_pose=None, target_pose=None, 
-                                    source_intrinsic=None, target_intrinsic = None)
-            # Get output from Semantic ControlNet
-            semantic_control = self.semantic_control_model(x=x_noisy, hint=torch.cat(cond['c_concat'], 1), 
-                                                        timesteps=t, context=cond_txt)
-            geometric_control = [c * scale for c, scale in zip(geometric_control, self.control_scales)]
-            semantic_control = [c * scale for c, scale in zip(semantic_control, self.control_scales)]
+            
+            geometric_control = None
+            semantic_control = None
+            
+            if self.use_geo:
+                with torch.no_grad():
+                    geometric_control = self.control_model(x=x_noisy, hint=torch.cat(cond['c_concat'], 1), timesteps=t, context=cond_txt, source_pose=None, target_pose=None, 
+                                        source_intrinsic=None, target_intrinsic=None)
+                geometric_control = [c * scale for c, scale in zip(geometric_control, self.control_scales)]
+            
+            if self.use_sem:
+                semantic_control = self.semantic_control_model(x=x_noisy, hint=torch.cat(cond['c_concat'], 1), 
+                                                            timesteps=t, context=cond_txt)
+                semantic_control = [c * scale for c, scale in zip(semantic_control, self.control_scales)]
 
-            eps, decoder_features = diffusion_model(x=x_noisy, timesteps=t, context=cond_txt, control=geometric_control,semantic_control=semantic_control, only_mid_control=self.only_mid_control,source_pose=source_pose, target_pose=target_pose, 
-                                source_intrinsic=source_intrinsic, target_intrinsic = target_intrinsic, return_decoder_features=True)
-
-        return eps, decoder_features
+            eps, decoder_features = diffusion_model(x=x_noisy, timesteps=t, context=cond_txt, 
+                                                    control=geometric_control,
+                                                    semantic_control=semantic_control, 
+                                                    only_mid_control=self.only_mid_control,
+                                                    source_pose=source_pose, target_pose=target_pose, 
+                                                    source_intrinsic=source_intrinsic, target_intrinsic=target_intrinsic, 
+                                                    return_decoder_features=True)
+        if return_intermediate:
+            return eps, decoder_features
+        else:
+            return eps
 
     @torch.no_grad()
     def get_unconditional_conditioning(self, N):

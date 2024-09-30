@@ -86,6 +86,7 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
+omni3d_b/
 
 # Translations
 *.mo

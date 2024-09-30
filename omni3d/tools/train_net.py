@@ -27,7 +27,7 @@ logger = logging.getLogger("cubercnn")
 
 sys.dont_write_bytecode = True
 sys.path.append(os.getcwd())
-np.set_printoptions(suppress=False)
+np.set_printoptions(suppress=True)
 
 from cubercnn.solver import build_optimizer, freeze_bn, PeriodicCheckpointerOnlyOne
 from cubercnn.config import get_cfg_defaults
@@ -106,12 +106,26 @@ def do_test(cfg, model, iteration='final', storage=None):
                 MetadataCatalog.get('omni3d_model').thing_classes, iteration
             )
             logger.info(log_str)
-            wandb.log({
-                "test/mean_AP": eval_helper.results['mean_AP'],
-                "test/mean_AP_50": eval_helper.results['mean_AP_50'],
-                "test/mean_AP_25": eval_helper.results['mean_AP_25'],
-                # 다른 관련 메트릭들도 추가할 수 있습니다.
+            log_dict = {}
+            # 2D 결과
+            if 'bbox_2D' in eval_helper.results:
+                for key, value in eval_helper.results['bbox_2D'].items():
+                    if key.startswith("AP"):
+                        log_dict[f"test/2D_{key}"] = value
+            
+            # 3D 결과
+            if 'bbox_3D' in eval_helper.results and not self._only_2d:
+                for key, value in eval_helper.results['bbox_3D'].items():
+                    if key.startswith("AP"):
+                        log_dict[f"test/3D_{key}"] = value
+            # 기존에 있던 로깅도 유지
+            log_dict.update({
+                "test/mean_AP": eval_helper.results.get('mean_AP', float('nan')),
+                "test/mean_AP_50": eval_helper.results.get('mean_AP_50', float('nan')),
+                "test/mean_AP_25": eval_helper.results.get('mean_AP_25', float('nan')),
             })
+            
+            wandb.log(log_dict)
 
     if comm.is_main_process():
         
@@ -122,7 +136,7 @@ def do_test(cfg, model, iteration='final', storage=None):
 
 
 def do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=False):
-
+    max_epoch = cfg.SOLVER.MAX_EPOCH
     max_iter = cfg.SOLVER.MAX_ITER
     do_eval = cfg.TEST.EVAL_PERIOD > 0
 
@@ -174,7 +188,24 @@ def do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=F
     recent_loss = None      # stores the most recent loss magnitude
 
     data_iter = iter(data_loader)
+    data_loader = build_detection_train_loader(cfg, mapper=data_mapper, dataset_id_to_src=dataset_id_to_src)
+    # Estimate iters_per_epoch
+    
+    # 데이터셋의 실제 크기를 구합니다
+    total_images = 0
+    for dataset_name in cfg.DATASETS.TRAIN:
+        dataset_dicts = DatasetCatalog.get(dataset_name)
+        total_images += len(dataset_dicts)
+    
+    logger.info(f"Total images in dataset: {total_images}")
+    
+    iters_per_epoch = total_images // cfg.SOLVER.IMS_PER_BATCH
 
+    # Epoch 및 loss 누적을 위한 변수들을 초기화합니다
+    current_epoch = start_iter // iters_per_epoch
+    epoch_loss = 0.0
+    epoch_losses = {}
+    epoch_loss_count = 0
     # model.parameters() is surprisingly expensive at 150ms, so cache it
     named_params = list(model.named_parameters())
 
@@ -188,11 +219,17 @@ def do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=F
             # forward
             loss_dict = model(data)
             losses = sum(loss_dict.values())
-            # ControlLDM에 K 값 전달
+
             # reduce
             loss_dict_reduced = {k: v.item() for k, v in allreduce_dict(loss_dict).items()}
             losses_reduced = sum(loss for loss in loss_dict_reduced.values())
-        
+            
+            # loss를 누적합니다
+            for k, v in loss_dict_reduced.items():
+                if k not in epoch_losses:
+                    epoch_losses[k] = 0
+                epoch_losses[k] += v
+            
             # sync up
             comm.synchronize()
 
@@ -268,37 +305,67 @@ def do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=F
 
             # Only retry if we have trained sufficiently long relative
             # to the latest checkpoint, which we would otherwise revert back to.
-            retry = (iterations_explode / total_iterations) >= cfg.MODEL.STABILIZE \
-                    and (total_iterations > cfg.SOLVER.CHECKPOINT_PERIOD*1/2)
+            # retry = (iterations_explode / total_iterations) >= cfg.MODEL.STABILIZE \
+            #         and (total_iterations > cfg.SOLVER.CHECKPOINT_PERIOD*1/2)
             
-            # Important for dist training. Convert to a float, then allreduce it, 
-            # if any process gradients have exploded then we must skip together.
-            retry = torch.tensor(float(retry)).cuda()
+            # # Important for dist training. Convert to a float, then allreduce it, 
+            # # if any process gradients have exploded then we must skip together.
+            # retry = torch.tensor(float(retry)).cuda()
             
-            if world_size > 1:
-                dist.all_reduce(retry)
+            # if world_size > 1:
+            #     dist.all_reduce(retry)
 
-            # sync up
-            comm.synchronize()
+            # # sync up
+            # comm.synchronize()
 
-            # any processes need to retry
-            if retry > 0:
+            # # any processes need to retry
+            # if retry > 0:
 
-                # instead of failing, try to resume the iteration instead. 
-                logger.warning('!! Restarting training at {} iters. Exploding loss {:d}% of iters !!'.format(
-                    iteration, int(100*(iterations_explode / (iterations_success + iterations_explode)))
-                ))
+            #     # instead of failing, try to resume the iteration instead. 
+            #     logger.warning('!! Restarting training at {} iters. Exploding loss {:d}% of iters !!'.format(
+            #         iteration, int(100*(iterations_explode / (iterations_success + iterations_explode)))
+            #     ))
 
-                # send these to garbage, for ideally a cleaner restart.
-                del data_mapper
-                del data_loader
-                del optimizer
-                del checkpointer
-                del periodic_checkpointer
-                return False
+            #     # send these to garbage, for ideally a cleaner restart.
+            #     del data_mapper
+            #     del data_loader
+            #     del optimizer
+            #     del checkpointer
+            #     del periodic_checkpointer
+            #     return False
                 
             scheduler.step()
+            
+            # Epoch 관련 계산 및 로깅을 이 위치로 이동
+            # Accumulate loss for the current epoch
+            epoch_loss += losses_reduced
+            epoch_loss_count += 1
 
+            # Check if an epoch has completed
+            if (iteration + 1) % iters_per_epoch == 0:
+                # Calculate average loss for the epoch
+                avg_epoch_losses = {k: v / epoch_loss_count for k, v in epoch_losses.items()}
+                avg_total_loss = sum(avg_epoch_losses.values())
+                
+                if comm.is_main_process():
+                    # Log epoch-level metrics
+                    storage.put_scalar("epoch", current_epoch)
+                    storage.put_scalar("epoch_loss", avg_total_loss)
+                    log_dict = {
+                        "epoch": current_epoch,
+                        "epoch_total_loss": avg_total_loss,
+                        "lr": optimizer.param_groups[0]["lr"],
+                    }
+                    log_dict.update({f"epoch_{k}": v for k, v in avg_epoch_losses.items()})
+                    wandb.log(log_dict)
+                    logger.info(f"Epoch {current_epoch} completed. Average loss: {avg_total_loss:.4f}")
+
+                # Reset epoch-level variables
+                epoch_loss = 0.0
+                epoch_loss_count = 0
+                epoch_losses = {}
+                current_epoch += 1
+            
             # Evaluate only when the loss is not diverging.
             if not (diverging_model > 0) and \
                 (do_eval and ((iteration + 1) % cfg.TEST.EVAL_PERIOD) == 0 and iteration != (max_iter - 1)):
@@ -322,8 +389,13 @@ def do_train(cfg, model, dataset_id_to_unknown_cats, dataset_id_to_src, resume=F
 
             iteration += 1
 
-            if iteration >= max_iter:
+            if current_epoch >= max_epoch:
+                print("중지")
                 break
+            else:
+                print(f"현재 epoch{current_epoch}, 최대 epoch {max_epoch}")
+            # if iteration >= max_iter:
+            #     break
     
     # success
     return True
@@ -482,12 +554,8 @@ def main(args):
     if remaining_attempts == 0:
         # Exit if the model could not finish without diverging. 
         raise ValueError('Training failed')
-    
-    test_results = do_test(cfg, model)
-
-    if comm.is_main_process():
-        wandb.finish()
-    return test_results
+        
+    return do_test(cfg, model)
 
 def allreduce_dict(input_dict, average=True):
     """

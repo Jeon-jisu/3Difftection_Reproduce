@@ -1,69 +1,24 @@
 _BASE_: "Base.yaml"
 SOLVER:
-  AMP:
-    ENABLED: True
   TYPE: "sgd"
-  IMS_PER_BATCH: 4
-  BASE_LR: 0.0012
+  IMS_PER_BATCH: 96
+  BASE_LR: 0.06
   STEPS: (69600, 92800)
   MAX_ITER: 116000
+  MAX_EPOCH: 200
   WARMUP_ITERS: 3625
 TEST:
   EVAL_PERIOD: 29000
 VIS_PERIOD: 2320
 DATASETS:
-  TRAIN: ('ARKitScenes_train', 'ARKitScenes_val') # 우선 이걸로 셋팅
-  TEST: ('ARKitScenes_test',) 
-  # TRAIN: ('SUNRGBD_train', 'SUNRGBD_val', 'Hypersim_train', 'Hypersim_val', 'ARKitScenes_train', 'ARKitScenes_val',  'nuScenes_train', 'nuScenes_val', 'KITTI_train', 'KITTI_val')
-  # TEST: ('SUNRGBD_test', 'Hypersim_test', 'ARKitScenes_test', 'KITTI_test', 'nuScenes_test') 
+  # TRAIN: ('ARKitScenes_train', 'ARKitScenes_val',)
+  # TEST: ('ARKitScenes_test',) 
+  TRAIN: ('SUNRGBD_train', 'SUNRGBD_val', 'Hypersim_train', 'Hypersim_val', 'ARKitScenes_train', 'ARKitScenes_val', 'nuScenes_train', 'nuScenes_val', 'KITTI_train', 'KITTI_val')
+  TEST: ('SUNRGBD_test', 'Hypersim_test', 'ARKitScenes_test', 'KITTI_test', 'nuScenes_test') 
   CATEGORY_NAMES: ('chair', 'table', 'cabinet', 'car', 'lamp', 'books', 'sofa', 'pedestrian', 'picture', 'window', 'pillow', 'truck', 'door', 'blinds', 'sink', 'shelves', 'television', 'shoes', 'cup', 'bottle', 'bookcase', 'laptop', 'desk', 'cereal box', 'floor mat', 'traffic cone', 'mirror', 'barrier', 'counter', 'camera', 'bicycle', 'toilet', 'bus', 'bed', 'refrigerator', 'trailer', 'box', 'oven', 'clothes', 'van', 'towel', 'motorcycle', 'night stand', 'stove', 'machine', 'stationery', 'bathtub', 'cyclist', 'curtain', 'bin')
 WANDB:
   PROJECT: "3Difftection-detection"
-  NAME: "debug"
+  NAME: "cube_rcnn_base_only_all_data_batch96_006"
 MODEL:
   ROI_HEADS:
     NUM_CLASSES: 50
-  # CONTROLLEDUNET:
-  #   CONFIG_PATH: './controlnet/models/cldm_v15v3.yaml'
-  #   PRETRAINED_PATH: './controlnet/models/new_semantic.ckpt'
-  #   SD_LOCKED: true
-  #   CONTROL_STAGE:
-  #     NAME: "controlnet"
-  #   SEMANTIC_CONTROL_STAGE:
-  #     NAME: "semantic_controlnet"
-  #   CONTROL_KEY: "control"
-  #   ONLY_MID_CONTROL: False
-  #   ARGS: []
-  #   KWARGS: []
-  #   VAE_LOCKED: True
-  CONTROLLDM:
-    CONFIG_PATH: './controlnet/models/cldm_v15v3.yaml'
-    CONTROL_STAGE:
-      target: "controlnet.cldm.cldm.ControlNet"
-      NAME: "controlnet"
-    SEMANTIC_CONTROL_STAGE:
-      target: "controlnet.cldm.cldm.SemanticControlNet"
-      NAME: "semantic_controlnet"
-    CONTROL_KEY: "control"
-    ONLY_MID_CONTROL: False
-    ARGS: []
-    KWARGS: []
-    FIRST_STAGE_CONFIG:
-      target: controlnet.ldm.models.autoencoder.AutoencoderKL
-      params:
-        embed_dim: 4
-        monitor: val/rec_loss
-        ddconfig:
-          double_z: true
-          z_channels: 4
-          resolution: 256
-          in_channels: 3
-          out_ch: 3
-          ch: 128
-          ch_mult: [1, 2, 4, 4]
-          num_res_blocks: 2
-          attn_resolutions: []
-          dropout: 0.0
-    COND_STAGE_CONFIG:
-      target: controlnet.ldm.modules.encoders.modules.FrozenCLIPEmbedder
-      params: {}

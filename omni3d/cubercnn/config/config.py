@@ -2,7 +2,7 @@
 from detectron2.config import CfgNode as CN
 
 def get_cfg_defaults(cfg):
-
+    cfg.SOLVER.MAX_EPOCH = 200
     # A list of category names which will be used
     cfg.DATASETS.CATEGORY_NAMES = []
 
@@ -126,10 +126,14 @@ def get_cfg_defaults(cfg):
     cfg.MODEL.ROI_CUBE_HEAD.LOSS_W_POSE = 1.0
 
     # Controlldm관련 Config 추가
+    
     cfg.MODEL.CONTROLLDM = CN()
+    cfg.MODEL.CONTROLLDM.USE_GEOMETRIC_CONTROL = False
+    cfg.MODEL.CONTROLLDM.USE_SEMANTIC_CONTROL = False
     cfg.MODEL.CONTROLLDM.CONTROL_STAGE = CN()
     cfg.MODEL.CONTROLLDM.CONTROL_STAGE.target = "controlnet.cldm.cldm.ControlNet"
     cfg.MODEL.CONTROLLDM.CONTROL_STAGE.NAME = "controlnet"
+    cfg.MODEL.CONTROLLDM.WEIGHTS_PRETRAIN = './controlnet/models/control_new_159.ckpt'
     cfg.MODEL.CONTROLLDM.SEMANTIC_CONTROL_STAGE = CN()
     cfg.MODEL.CONTROLLDM.SEMANTIC_CONTROL_STAGE.target = "controlnet.cldm.cldm.SemanticControlNet"
     cfg.MODEL.CONTROLLDM.SEMANTIC_CONTROL_STAGE.NAME = "semantic_controlnet"
@@ -159,20 +163,6 @@ def get_cfg_defaults(cfg):
     cfg.MODEL.CONTROLLDM.COND_STAGE_CONFIG.target = "ldm.modules.encoders.modules.FrozenCLIPEmbedder"
     cfg.MODEL.CONTROLLDM.COND_STAGE_CONFIG.params = CN()
 
-    # ControlnetUnet관련 Config 추가
-    # cfg.MODEL.CONTROLLEDUNET = CN()
-    # cfg.MODEL.CONTROLLEDUNET.CONFIG_PATH = "./controlnet/models/cldm_v15v3.yaml"
-    # cfg.MODEL.CONTROLLEDUNET.PRETRAINED_PATH = "./controlnet/models/new_semantic.ckpt"
-    # cfg.MODEL.CONTROLLEDUNET.SD_LOCKED = True
-    # cfg.MODEL.CONTROLLEDUNET.VAE_LOCKED = True
-    # cfg.MODEL.CONTROLLEDUNET.CONTROL_STAGE = CN()
-    # cfg.MODEL.CONTROLLEDUNET.CONTROL_STAGE.NAME = "controlnet"
-    # cfg.MODEL.CONTROLLEDUNET.SEMANTIC_CONTROL_STAGE = CN()
-    # cfg.MODEL.CONTROLLEDUNET.SEMANTIC_CONTROL_STAGE.NAME = "semantic_controlnet"
-    # cfg.MODEL.CONTROLLEDUNET.CONTROL_KEY = "hint"
-    # cfg.MODEL.CONTROLLEDUNET.ONLY_MID_CONTROL = False
-    # cfg.MODEL.CONTROLLEDUNET.ARGS = []
-    # cfg.MODEL.CONTROLLEDUNET.KWARGS = []
 
     cfg.MODEL.DLA = CN()
 
@@ -210,4 +200,4 @@ def get_cfg_defaults(cfg):
     cfg.MODEL.ROI_CUBE_HEAD.SCALE_ROI_BOXES = 0.0
 
     # weight path specifically for pretraining (no checkpointables will be loaded)
-    cfg.MODEL.WEIGHTS_PRETRAIN = ''
+    cfg.MODEL.WEIGHTS_PRETRAIN = './controlnet/models/control_new_159.ckpt'

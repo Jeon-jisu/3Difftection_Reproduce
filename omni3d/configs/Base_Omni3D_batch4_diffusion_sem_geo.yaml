@@ -1,0 +1,56 @@
+_BASE_: "Base2.yaml"
+SOLVER:
+  TYPE: "sgd"
+  IMS_PER_BATCH: 8
+  BASE_LR: 0.0006
+  STEPS: (69600, 92800)
+  MAX_ITER: 116000
+  MAX_EPOCH: 200
+  WARMUP_ITERS: 3625
+TEST:
+  EVAL_PERIOD: 29000
+VIS_PERIOD: 2320
+DATASETS:
+  TRAIN: ('SUNRGBD_train', 'SUNRGBD_val', 'Hypersim_train', 'Hypersim_val', 'ARKitScenes_train', 'ARKitScenes_val', 'nuScenes_train', 'nuScenes_val', 'KITTI_train', 'KITTI_val')
+  TEST: ('SUNRGBD_test', 'Hypersim_test', 'ARKitScenes_test', 'KITTI_test', 'nuScenes_test') 
+  CATEGORY_NAMES: ('chair', 'table', 'cabinet', 'car', 'lamp', 'books', 'sofa', 'pedestrian', 'picture', 'window', 'pillow', 'truck', 'door', 'blinds', 'sink', 'shelves', 'television', 'shoes', 'cup', 'bottle', 'bookcase', 'laptop', 'desk', 'cereal box', 'floor mat', 'traffic cone', 'mirror', 'barrier', 'counter', 'camera', 'bicycle', 'toilet', 'bus', 'bed', 'refrigerator', 'trailer', 'box', 'oven', 'clothes', 'van', 'towel', 'motorcycle', 'night stand', 'stove', 'machine', 'stationery', 'bathtub', 'cyclist', 'curtain', 'bin')
+WANDB:
+  PROJECT: "3Difftection-detection"
+  NAME: "cube_rcnn_base_only_diffusion_semantic_geo_notshared"
+MODEL:
+  ROI_HEADS:
+    NUM_CLASSES: 50
+  CONTROLLDM:
+    USE_GEOMETRIC_CONTROL: True
+    USE_SEMANTIC_CONTROL: True
+    WEIGHTS_PRETRAIN: './controlnet/models/control_new_159.ckpt'
+    CONFIG_PATH: './controlnet/models/cldm_v15v3.yaml'
+    CONTROL_STAGE:
+      target: "controlnet.cldm.cldm.ControlNet"
+      NAME: "controlnet"
+    SEMANTIC_CONTROL_STAGE:
+      target: "controlnet.cldm.cldm.SemanticControlNet"
+      NAME: "semantic_controlnet"
+    CONTROL_KEY: "control"
+    ONLY_MID_CONTROL: False
+    ARGS: []
+    KWARGS: []
+    FIRST_STAGE_CONFIG:
+      target: controlnet.ldm.models.autoencoder.AutoencoderKL
+      params:
+        embed_dim: 4
+        monitor: val/rec_loss
+        ddconfig:
+          double_z: true
+          z_channels: 4
+          resolution: 256
+          in_channels: 3
+          out_ch: 3
+          ch: 128
+          ch_mult: [1, 2, 4, 4]
+          num_res_blocks: 2
+          attn_resolutions: []
+          dropout: 0.0
+    COND_STAGE_CONFIG:
+      target: controlnet.ldm.modules.encoders.modules.FrozenCLIPEmbedder
+      params: {}

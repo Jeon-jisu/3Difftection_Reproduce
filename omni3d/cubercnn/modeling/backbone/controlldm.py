@@ -9,16 +9,18 @@ from detectron2.modeling.backbone.build import BACKBONE_REGISTRY
 from detectron2.modeling.backbone.fpn import FPN
 from detectron2.layers import ShapeSpec
 import yaml
+import logging
+logger = logging.getLogger(__name__)
 
 
 class ControlLDMBackbone(Backbone):
-    def __init__(self, cfg, input_shape):
+    def __init__(self, cfg, input_shape,pretrained=True):
         super().__init__()
         # Load the full config
+        
         self.clip_embedder = FrozenCLIPEmbedder()
         with open(cfg.MODEL.CONTROLLDM.CONFIG_PATH, 'r') as f:
             full_config = yaml.safe_load(f)
-        
         # Extract the necessary configurations
         model_config = full_config['model']['params']
         first_stage_config = model_config['first_stage_config']
@@ -49,21 +51,38 @@ class ControlLDMBackbone(Backbone):
             'only_mid_control': cfg.MODEL.CONTROLLDM.ONLY_MID_CONTROL,
             "cond_stage_config": dict(cfg.MODEL.CONTROLLDM.COND_STAGE_CONFIG),
         })
+        self.controlldm = ControlLDM(cfg.MODEL.CONTROLLDM.USE_GEOMETRIC_CONTROL,cfg.MODEL.CONTROLLDM.USE_SEMANTIC_CONTROL,**model_config,)
+        if pretrained and cfg.MODEL.CONTROLLDM.WEIGHTS_PRETRAIN:
+            self.load_pretrained_weights(cfg.MODEL.CONTROLLDM.WEIGHTS_PRETRAIN)
+            logger.info("로드 완료")
+        else:
+            logger.info(f"로드 미완료, pretrained: {pretrained}, cfg.MODEL.CONTROLLDM.WEIGHTS_PRETRAIN: {cfg.MODEL.CONTROLLDM.WEIGHTS_PRETRAIN}")
         
-        self.controlldm = ControlLDM(**model_config)
         # TODO: 이 부분 그냥 Output feature 맞춰서 수정해주었는데 확인이 필요
         # Define output feature names and channels 
         self._out_features = ["p2", "p3", "p4", "p5", "p6"]
         self._out_feature_channels = {
-            "p2": 1280, "p3": 1280, "p4": 640, "p5": 320, "p6": 320
+            "p2": 320, "p3": 320, "p4": 640, "p5": 1280, "p6": 1280
         }
         self._out_feature_strides = {
             "p2": 4, "p3": 8, "p4": 16, "p5": 32, "p6": 64
         }
+    def load_pretrained_weights(self, weights_path):
+        state_dict = torch.load(weights_path, map_location='cpu')
+        
+        # ControlLDM 모델의 state_dict와 로드된 state_dict의 키가 일치하는지 확인
+        controlldm_state_dict = self.controlldm.state_dict()
+        filtered_state_dict = {k: v for k, v in state_dict.items() if k in controlldm_state_dict}
+        
+        # 가중치 로드
+        self.controlldm.load_state_dict(filtered_state_dict, strict=False)
+        print(f"Loaded pre-trained weights from {weights_path}")
 
     def forward(self, x):
         batch_size = x.shape[0]
-        dummy_timesteps = torch.zeros(batch_size, device=x.device)
+        desired_timestep = 261
+        dummy_timesteps = torch.full((batch_size,), desired_timestep, device=x.device, dtype=torch.long)
+        # dummy_timesteps = torch.zeros(batch_size, device=x.device)
         
         # 빈 문자열 인코딩
         empty_string = ""
@@ -86,31 +105,11 @@ class ControlLDMBackbone(Backbone):
         # Stable Diffusion의 feature maps 추출
         sd_features = []
         h = x_encoded
-        # for module in self.controlldm.model.diffusion_model.input_blocks:
-        #     h = module(h, dummy_timesteps, dummy_context)
-        #     sd_features.append(h)
-        # h = self.controlldm.model.diffusion_model.middle_block(h, dummy_timesteps, dummy_context)
-        # sd_features.append(h)
-
-        # Geometric ControlNet의 feature maps 추출
-        # geo_features = self.controlldm.control_model(x_encoded, x, dummy_timesteps, dummy_context)
-        # print("Geometric ControlNet feature shapes:")
-        # for i, feature in enumerate(geo_features):
-        #     print(f"Layer {i}: {feature.shape}")
-        # TODO: 이거는 나중에 controlnet에 같이 넣어줘야할듯
-        # sem_features = self.controlldm.semantic_control_model(x_encoded, x, dummy_timesteps, dummy_context)
-        # print("Semantic ControlNet feature shapes:")
-        # for i, feature in enumerate(sem_features):
-        #     print(f"Layer {i}: {feature.shape}")
 
         eps, decoder_features = self.controlldm.apply_model(x_encoded, dummy_timesteps, cond)
-        # print("Decoder feature shapes:")
-        # for i, feature in enumerate(decoder_features):
-        #     print(f"Layer {i}: {feature.shape}")
-
         # 여기서 decoder_features와 geo_features를 결합하거나 처리하여 outputs 생성
         outputs = {}
-        selected_layers = [0, 3, 6, 9, 11]
+        selected_layers = [11, 9, 6, 3, 0]
         for i, feature_name in enumerate(self._out_features):
             if i < len(selected_layers):
                 outputs[feature_name] = decoder_features[selected_layers[i]]
@@ -119,22 +118,11 @@ class ControlLDMBackbone(Backbone):
                 outputs[feature_name] = F.max_pool2d(outputs[self._out_features[i-1]], kernel_size=2, stride=2)
 
         return outputs
-        # print("features[0].shape",features[0].shape,"features[1].shape",features[1].shape,"features[2].shape",features[2].shape,"features[3].shape",features[3].shape)
-        # print("features.length",len(features))
-        # print("features[4].shape",features[4].shape )
-        # # features를 적절한 형식으로 변환
-        # outputs = { #원래는 1,2,3,4였음.
-        #     "p2": features[1],
-        #     "p3": features[2],
-        #     "p4": features[3],
-        #     "p5": features[4],
-        #     "p6": F.max_pool2d(features[4], kernel_size=2, stride=2)
-        # }
-        # return outputs
     
 @BACKBONE_REGISTRY.register()
 def build_controlldm_fpn_backbone(cfg, input_shape: ShapeSpec, priors=None):
-    bottom_up = ControlLDMBackbone(cfg, input_shape)
+    imagenet_pretrain = cfg.MODEL.WEIGHTS + cfg.MODEL.WEIGHTS_PRETRAIN != '' #cfg에서 가중치 경로가 설정되어있지 않다면 imagenet pretrain을 사용하려나봄.
+    bottom_up = ControlLDMBackbone(cfg,input_shape,pretrained = imagenet_pretrain)
     in_features = cfg.MODEL.FPN.IN_FEATURES
     out_channels = cfg.MODEL.FPN.OUT_CHANNELS
 

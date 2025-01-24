@@ -93,8 +93,8 @@ def create_annotation(datapath, exclude_video_id=''):
             continue
         
         video_path = os.path.join(train_path, video_id)
-        rotate_resize_path = os.path.join(video_path, 'extract_resize')
-        intrinsics_path = os.path.join(video_path, 'extract_intrinsic_not_rotate')
+        rotate_resize_path = os.path.join(video_path, 'extract_rotate_resize')
+        intrinsics_path = os.path.join(video_path, 'extract_new_process_intrinsic')
         traj_file = os.path.join(video_path, 'lowres_wide.traj')
         
         if not all(os.path.exists(path) for path in [rotate_resize_path, intrinsics_path]):
@@ -158,12 +158,12 @@ def create_annotation(datapath, exclude_video_id=''):
             source_camera_pose = pose_data[source_closest]['rotation'] + pose_data[source_closest]['translation']
             target_camera_pose = pose_data[target_closest]['rotation'] + pose_data[target_closest]['translation']
             
-            rotation_angle = calculate_rotation_angle(f"Training/{video_id}/extract_resize/{source_image}", 
+            rotation_angle = calculate_rotation_angle(f"Validation/{video_id}/extract_rotate_resize/{source_image}", 
                                                       source_camera_pose, target_camera_pose)
             
             annotation = {
-                "source_image": f"Training/{video_id}/extract_resize/{source_image}",
-                "target_image": f"Training/{video_id}/extract_resize/{target_image}",
+                "source_image": f"Validation/{video_id}/extract_rotate_resize/{source_image}",
+                "target_image": f"Validation/{video_id}/extract_rotate_resize/{target_image}",
                 "source_camera_pose": source_camera_pose,
                 "target_camera_pose": target_camera_pose,
                 "source_image_timestamp": source_closest,
@@ -193,11 +193,11 @@ def create_annotation(datapath, exclude_video_id=''):
     return annotations
 
 if __name__ == "__main__":
-    base_path = "/node_data/urp24s_jsjeon/3Difftection_Reproduce/ControlNet2/raw/Training"
+    base_path = "/node_data_2/urp24s_jsjeon/3Difftection_Reproduce/omni3d/controlnet/raw/Validation"
     annotations = create_annotation(base_path)
     
     current_directory = os.getcwd()
-    json_file_path = os.path.join(current_directory, 'annotations_not_rotate2.json')
+    json_file_path = os.path.join(current_directory, 'new_anntoation.json')
     
     with open(json_file_path, 'w') as f:
         json.dump(annotations, f, indent=2)
@@ -206,7 +206,7 @@ if __name__ == "__main__":
 
     # 필터링 부분 추가
     input_json_path = json_file_path
-    output_json_path = os.path.join(current_directory, 'annotations_not_rotate_filter.json')
+    output_json_path = os.path.join(current_directory, 'new_anntoation_filter.json')
 
     with open(input_json_path, 'r') as file:
         data = json.load(file)

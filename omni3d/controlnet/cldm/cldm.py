@@ -178,29 +178,65 @@ class EpipolarWarpOperator(nn.Module):
         rotation_matrix = torch.cos(theta) * I + (1 - torch.cos(theta)) * torch.outer(r, r) + torch.sin(theta) * r_cross
         return rotation_matrix
 
-    
 class ControlledUnetModel(UNetModel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         
     def forward(self, x, timesteps=None, context=None, control=None, semantic_control=None, only_mid_control=False, source_pose=None, target_pose=None, source_intrinsic=None, target_intrinsic=None, **kwargs):
         hs = []
-        # 이 부분은 Frozen된 SD의 부분인듯. 
+        encoder_features = []  # encoder features를 저장할 리스트
+        
+        # control과 semantic_control 복사본 생성 (encoder features용)
+        control_copy = control.copy() if control is not None else None
+        semantic_control_copy = semantic_control.copy() if semantic_control is not None else None
+        # print("\nEncoder Feature Channels:")
         with torch.no_grad():
             t_emb = timestep_embedding(timesteps, self.model_channels, repeat_only=False)
             emb = self.time_embed(t_emb)
             h = x.type(self.dtype)
-            for module in self.input_blocks:
+            for i, module in enumerate(self.input_blocks):
                 h = module(h, emb, context)
                 hs.append(h)
-                # hs에는 target image가 time과 context를 고려한 다양한 해상도의 값을 가지고 있겠다. 
-            h = self.middle_block(h, emb, context) # 마지막에는 Middel Block을 거쳐서 나온 값.
+                # print(f"\nInput Block {i}:")
+                # print(f"Base feature shape: {h.shape}")
+                # encoder feature 저장 (control과 semantic control 포함)
+                if not only_mid_control and control_copy is not None and len(control_copy) > 0:
+                    control_feat = control_copy.pop(0)
+                    # print(f"Control feature shape: {control_feat.shape}")
+                    current_feature = h + control_feat
+                    if semantic_control_copy is not None and len(semantic_control_copy) > 0:
+                        semantic_feat = semantic_control_copy.pop(0)
+                        # print(f"Semantic control feature shape: {semantic_feat.shape}")
+                        current_feature = current_feature + semantic_feat
+                else:
+                    current_feature = h
+                # print(f"Combined feature shape: {current_feature.shape}")
+                encoder_features.append(current_feature)
+                
+            h = self.middle_block(h, emb, context)
+            # print("\nMiddle Block:")
+            # print(f"Base middle feature shape: {h.shape}")
+            # middle block의 feature도 저장
+            if control_copy is not None and len(control_copy) > 0:
+                control_feat = control_copy.pop(0)
+                # print(f"Middle control feature shape: {control_feat.shape}")
+                current_feature = h + control_feat
+                if semantic_control_copy is not None and len(semantic_control_copy) > 0:
+                    semantic_feat = semantic_control_copy.pop(0)
+                    # print(f"Middle semantic control feature shape: {semantic_feat.shape}")
+                    current_feature = current_feature + semantic_feat
+            else:
+                current_feature = h
+            # print(f"Combined middle feature shape: {current_feature.shape}")
+            encoder_features.append(current_feature)
+
+        # 원본 코드의 디코더 부분 유지
         decoder_features = []
         if control is not None:
             h += control.pop()
         if semantic_control is not None:
             h += semantic_control.pop()
-        # output blocks를 순회하면서 디코딩을 수행. hs에는 앞서 인코딩할때 각 해상도에서 저장해놓은 feature map이 있음. 
+            
         for i, module in enumerate(self.output_blocks):
             if only_mid_control or control is None:
                 h = torch.cat([h, hs.pop()], dim=1)
@@ -208,11 +244,12 @@ class ControlledUnetModel(UNetModel):
                 hs_popped = hs.pop()
                 control_popped = control.pop()
                 semantic_control_popped = semantic_control.pop() if semantic_control is not None else torch.zeros_like(hs_popped)
-                h = torch.cat([h, hs_popped + control_popped+semantic_control_popped], dim=1)
+                h = torch.cat([h, hs_popped + control_popped + semantic_control_popped], dim=1)
             h = module(h, emb, context)
             decoder_features.append(h)
+            
         h = h.type(x.dtype)
-        return self.out(h), decoder_features
+        return self.out(h), decoder_features, encoder_features
 
 
 class ControlNet(nn.Module):
@@ -812,7 +849,7 @@ class ControlLDM(LatentDiffusion):
                                                             timesteps=t, context=cond_txt)
                 semantic_control = [c * scale for c, scale in zip(semantic_control, self.control_scales)]
 
-            eps, decoder_features = diffusion_model(x=x_noisy, timesteps=t, context=cond_txt, 
+            eps, decoder_features, encoder_features = diffusion_model(x=x_noisy, timesteps=t, context=cond_txt, 
                                                     control=geometric_control,
                                                     semantic_control=semantic_control, 
                                                     only_mid_control=self.only_mid_control,
@@ -820,7 +857,7 @@ class ControlLDM(LatentDiffusion):
                                                     source_intrinsic=source_intrinsic, target_intrinsic=target_intrinsic, 
                                                     return_decoder_features=True)
         if return_intermediate:
-            return eps, decoder_features
+            return eps, decoder_features, encoder_features
         else:
             return eps
 

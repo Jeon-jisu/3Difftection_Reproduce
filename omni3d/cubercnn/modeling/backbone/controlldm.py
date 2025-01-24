@@ -3,13 +3,18 @@ from controlnet.ldm.modules.encoders.modules import FrozenCLIPEmbedder
 from controlnet.ldm.modules.distributions.distributions import DiagonalGaussianDistribution
 
 import torch
+import numpy as np
+from sklearn.cluster import KMeans
+from PIL import Image
 import torch.nn.functional as F
 from detectron2.modeling.backbone import Backbone
 from detectron2.modeling.backbone.build import BACKBONE_REGISTRY
 from detectron2.modeling.backbone.fpn import FPN
 from detectron2.layers import ShapeSpec
 import yaml
+import os
 import logging
+from torchvision.utils import save_image
 logger = logging.getLogger(__name__)
 
 
@@ -17,7 +22,10 @@ class ControlLDMBackbone(Backbone):
     def __init__(self, cfg, input_shape,pretrained=True):
         super().__init__()
         # Load the full config
-        
+        self.save_counter = 0
+        self.save_interval = 2320
+        self.save_dir = 'feature_maps4'
+        os.makedirs(self.save_dir, exist_ok=True)
         self.clip_embedder = FrozenCLIPEmbedder()
         with open(cfg.MODEL.CONTROLLDM.CONFIG_PATH, 'r') as f:
             full_config = yaml.safe_load(f)
@@ -67,6 +75,7 @@ class ControlLDMBackbone(Backbone):
         self._out_feature_strides = {
             "p2": 4, "p3": 8, "p4": 16, "p5": 32, "p6": 64
         }
+        
     def load_pretrained_weights(self, weights_path):
         state_dict = torch.load(weights_path, map_location='cpu')
         
@@ -77,6 +86,43 @@ class ControlLDMBackbone(Backbone):
         # 가중치 로드
         self.controlldm.load_state_dict(filtered_state_dict, strict=False)
         print(f"Loaded pre-trained weights from {weights_path}")
+    def save_feature_map(self, feature_map, original_image,  n, level):
+        # CPU로 이동 및 numpy 배열로 변환
+        feature_map_np = feature_map[0].detach().cpu().numpy()  # 배치의 첫 번째 이미지만 사용
+        
+        # 채널 차원을 평탄화 (C, H, W) -> (H*W, C)
+        flattened = feature_map_np.reshape(feature_map_np.shape[0], -1).T
+        
+        # K-means 클러스터링 수행 (k=5)
+        kmeans = KMeans(n_clusters=5, random_state=0).fit(flattened)
+        
+        # 클러스터 레이블을 원래 형태로 재구성
+        cluster_labels = kmeans.labels_.reshape(feature_map_np.shape[1], feature_map_np.shape[2])
+        
+        # 클러스터 중심값으로 이미지 생성
+        cluster_centers = kmeans.cluster_centers_
+        clustered_image = cluster_centers[cluster_labels]
+        
+        # 정규화
+        normalized = (clustered_image - clustered_image.min()) / (clustered_image.max() - clustered_image.min())
+        
+        # RGB 이미지로 변환 (첫 3개 채널 사용 또는 채널 평균)
+        if normalized.shape[2] >= 3:
+            rgb_image = (normalized[:, :, :3] * 255).astype(np.uint8)
+        else:
+            rgb_image = (np.mean(normalized, axis=2)[:, :, np.newaxis] * 255).astype(np.uint8)
+            rgb_image = np.repeat(rgb_image, 3, axis=2)
+        
+        # 이미지 저장
+        img = Image.fromarray(rgb_image)
+        img.save(os.path.join(self.save_dir, f'feature_map_{level}_{self.save_counter}.png'))
+        
+        # 원본 이미지 저장
+        save_image(original_image[0], os.path.join(self.save_dir, f'original_image_{self.save_counter}.png'), normalize=True)
+        # original_image_np = original_image[0].permute(1, 2, 0).cpu().numpy()
+        # original_image_np = (original_image_np * 255).astype(np.uint8)
+        # original_img = Image.fromarray(original_image_np)
+        # original_img.save(os.path.join(self.save_dir, f'original_image_{self.save_counter}.png'))
 
     def forward(self, x):
         batch_size = x.shape[0]
@@ -106,16 +152,24 @@ class ControlLDMBackbone(Backbone):
         sd_features = []
         h = x_encoded
 
-        eps, decoder_features = self.controlldm.apply_model(x_encoded, dummy_timesteps, cond)
+        eps, decoder_features, combined_encoder_features = self.controlldm.apply_model(x_encoded, dummy_timesteps, cond, return_intermediate=True)
         # 여기서 decoder_features와 geo_features를 결합하거나 처리하여 outputs 생성
         outputs = {}
-        selected_layers = [11, 9, 6, 3, 0]
+        selected_layers = [0,3,6,9,11]
         for i, feature_name in enumerate(self._out_features):
             if i < len(selected_layers):
-                outputs[feature_name] = decoder_features[selected_layers[i]]
+                outputs[feature_name] = combined_encoder_features[selected_layers[i]]
             else:
                 # p6의 경우 p5와 동일
                 outputs[feature_name] = F.max_pool2d(outputs[self._out_features[i-1]], kernel_size=2, stride=2)
+        # 특정 간격으로 feature map 저장
+        self.save_counter += 1
+        if self.save_counter % self.save_interval == 0:
+            self.save_feature_map(outputs['p2'],x, 4, 'p2')  # 4x4
+            self.save_feature_map(outputs['p3'],x, 8, 'p3')  # 8x8
+            self.save_feature_map(outputs['p4'],x, 16, 'p4')  # 16x16
+            self.save_feature_map(outputs['p5'],x, 32, 'p5')   # 32x32
+            self.save_feature_map(outputs['p6'],x, 32, 'p6')   # 32x32
 
         return outputs
     

@@ -1,7 +1,7 @@
 _BASE_: "Base2.yaml"
 SOLVER:
   TYPE: "sgd"
-  IMS_PER_BATCH: 8
+  IMS_PER_BATCH: 1
   BASE_LR: 0.0006
   STEPS: (69600, 92800)
   MAX_ITER: 116000
@@ -11,10 +11,10 @@ TEST:
   EVAL_PERIOD: 29000
 VIS_PERIOD: 2320
 DATASETS:
-  # TRAIN: ('SUNRGBD_train', 'SUNRGBD_val', )
-  # TEST: ('SUNRGBD_test',) 
-  TRAIN: ('SUNRGBD_train', 'SUNRGBD_val', 'Hypersim_train', 'Hypersim_val', 'ARKitScenes_train', 'ARKitScenes_val', 'nuScenes_train', 'nuScenes_val', 'KITTI_train', 'KITTI_val')
-  TEST: ('SUNRGBD_test', 'Hypersim_test', 'ARKitScenes_test', 'KITTI_test', 'nuScenes_test') 
+  TRAIN: ('SUNRGBD_train', 'SUNRGBD_val', )
+  TEST: ('SUNRGBD_test',) 
+  # TRAIN: ('SUNRGBD_train', 'SUNRGBD_val', 'Hypersim_train', 'Hypersim_val', 'ARKitScenes_train', 'ARKitScenes_val', 'nuScenes_train', 'nuScenes_val', 'KITTI_train', 'KITTI_val')
+  # TEST: ('SUNRGBD_test', 'Hypersim_test', 'ARKitScenes_test', 'KITTI_test', 'nuScenes_test') 
   CATEGORY_NAMES: ('chair', 'table', 'cabinet', 'car', 'lamp', 'books', 'sofa', 'pedestrian', 'picture', 'window', 'pillow', 'truck', 'door', 'blinds', 'sink', 'shelves', 'television', 'shoes', 'cup', 'bottle', 'bookcase', 'laptop', 'desk', 'cereal box', 'floor mat', 'traffic cone', 'mirror', 'barrier', 'counter', 'camera', 'bicycle', 'toilet', 'bus', 'bed', 'refrigerator', 'trailer', 'box', 'oven', 'clothes', 'van', 'towel', 'motorcycle', 'night stand', 'stove', 'machine', 'stationery', 'bathtub', 'cyclist', 'curtain', 'bin')
 WANDB:
   PROJECT: "3Difftection-detection"
@@ -26,7 +26,7 @@ MODEL:
     USE_GEOMETRIC_CONTROL: False
     USE_SEMANTIC_CONTROL: False
     WEIGHTS_PRETRAIN: './controlnet/models/control_new_159.ckpt'
-    CONFIG_PATH: './controlnet/models/cldm_v15v3.yaml'
+    CONFIG_PATH: './controlnet/models/cldm_v15v4.yaml'
     CONTROL_STAGE:
       target: "controlnet.cldm.cldm.ControlNet"
       NAME: "controlnet"

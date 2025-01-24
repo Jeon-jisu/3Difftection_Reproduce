@@ -213,3 +213,7 @@ omni3d/output/omni3d_example_run/log.txt
 omni3d/output/omni3d_example_run/metrics.json
 omni3d/output/omni3d_example_run/model_recent.pth
 omni3d/output_first_5_items.txt
+testControlNet4/
+testControlNet5/
+testControlNet6/
+wandb/
